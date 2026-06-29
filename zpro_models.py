@@ -1,0 +1,147 @@
+from __future__ import annotations
+import re
+from enum import Enum
+from pydantic import BaseModel, ConfigDict, Field
+
+
+# Modelos do payload do Z-PRO, json_ZPRO tem o retorno json dele
+#____________________----------------_______________---------------________
+
+class _ZproBase(BaseModel):
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+class ZproKey(_ZproBase):
+    id: str  
+    from_me: bool = Field(default=False, validate_alias="fromMe")
+    remote_jid: str | None = Field(default=None, validade_alias="remoteJid")
+    sender_pn: str | None = None   
+
+class ZproExtendedText(_ZproBase):
+    text: str | None = None
+
+class ZproMessageContent(_ZproBase):
+    conversation: str | None = None
+    extended_text_message: ZproExtendedText | None = Field(default=None, validation_alias="extendedTextMessage")
+
+class ZproMsg(_ZproBase):
+    key: ZproKey
+    message_timestamp: int | None = Field(default=None, validation_alias="messageTimestamp")
+    push_name: str | None = Field(default=None, validation_alias="pushName")
+    message: ZproMessageContent | None = None
+
+class ZproWhatsapp(_ZproBase):
+    id: int | None = None
+    name: str | None = None
+    type: str | None = None      # "baileys" agora; "waba"/oficial depois -> self-describe p/ migração
+
+
+class ZproContact(_ZproBase):
+    id: int | None = None
+    number: str | None = None    
+    name: str | None = None
+    pushname: str | None = None
+
+class ZproTicket(_ZproBase):
+    id: int | None = None
+    is_group: bool = Field(default=False, validation_alias="isGroup")
+    tenant_id: int | None = Field(default=None, validation_alias="tenantId")     # tenant Z-PRO (a empresa)
+    whatsapp_id: int | None = Field(default=None, validation_alias="whatsappId") # canal -> futuro multi-tenant
+    contact: ZproContact | None = None
+    whatsapp: ZproWhatsapp | None = None
+
+class ZproWebhookPayload(_ZproBase):
+    method: str              
+    msg: ZproMsg | None = None
+    ticket: ZproTicket | None = None
+
+# Modelo interno (o que o sisetma enxerga)
+# _____________-----------------_________________-----------------------
+ 
+class MessageType(str, Enum):
+    TEXT = "text"
+    UNSUPPORTED = "unsupported"   # áudio, imagem, etc. — tratamos na 2.x
+
+
+class IncomingMessage(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    message_id: str               # msg.key.id  -> dedup
+    phone: str                    # só dígitos com DDI: "555592372732"
+    text: str | None
+    message_type: MessageType
+    push_name: str | None
+
+    timestamp: int | None
+    # Contexto Z-PRO (guardado desde já p/ multi-tenant por canal no futuro)
+    zpro_ticket_id: int | None
+    zpro_whatsapp_id: int | None
+    zpro_tenant_id: int | None
+    channel_type: str | None  
+
+    raw: dict              
+
+
+#payload cri -> IncomingMessage (com os filtros)
+#___________-------------------________________-----------------------
+
+class IgnoreMessage(Exception):
+    """Mensagem que não deve ser processada (eco, grupo, evento não-message, sem telefone)."""
+
+def normalize_phone(value: str | None) -> str | None:
+    """Mantém só os dígitos. '555592372732@s.whatsapp.net' -> '555592372732'."""
+    if not value:
+        return None
+    digits = re.sub(r"\D", "", value)
+    return digits or None
+
+def _extract_text(message: ZproMessageContent | None) -> str | None:
+    if message is None:
+        return None
+    if message.conversation:
+        return message.conversation
+    if message.extended_text_message and message.extended_text_message.text:
+        return message.extended_text_message.text
+    
+def parse_zpro_webhook(raw: dict) -> IncomingMessage:
+    """Valida o corpo do webhook e converte no modelo interno.
+
+    Levanta IgnoreMessage quando a mensagem não deve seguir adiante.
+    """
+    payload = ZproWebhookPayload.model_validate(raw)
+
+    if payload.method != "message" or payload.msg is None:
+        raise IgnoreMessage(f"evento ignorado: method={payload.method!r}")
+
+    msg = payload.msg
+    ticket = payload.ticket
+
+    if msg.key.from_me:
+        raise IgnoreMessage("eco da própria resposta (fromMe=true)")
+    if ticket and ticket.is_group:
+        raise IgnoreMessage("mensagem de grupo")
+
+    # Telefone: prioriza ticket.contact.number (já limpo); fallback sender_pn.
+    phone = normalize_phone(ticket.contact.number) if (ticket and ticket.contact) else None
+    if not phone:
+        phone = normalize_phone(msg.key.sender_pn)
+    if not phone:
+        raise IgnoreMessage("sem telefone identificável")
+
+    text = _extract_text(msg.message)
+    message_type = MessageType.TEXT if text else MessageType.UNSUPPORTED
+
+    push_name = msg.push_name or (ticket.contact.name if ticket and ticket.contact else None)
+
+    return IncomingMessage(
+        message_id=msg.key.id,
+        phone=phone,
+        text=text,
+        message_type=message_type,
+        push_name=push_name,
+        timestamp=msg.message_timestamp,
+        zpro_ticket_id=ticket.id if ticket else None,
+        zpro_whatsapp_id=ticket.whatsapp_id if ticket else None,
+        zpro_tenant_id=ticket.tenant_id if ticket else None,
+        channel_type=(ticket.whatsapp.type if ticket and ticket.whatsapp else None),
+        raw=raw,
+    )
