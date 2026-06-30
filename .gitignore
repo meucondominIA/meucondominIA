@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Ambientes virtuais
+venv/
+.venv/
+
+# Segredos e config local (NUNCA versionar)
+.env
+.env.*
+!.env.example
+
+# Instruções privadas (não vão pro repo)
+CLAUDE.local.md
+
+# Logs / OS
+*.log
+.DS_Store
