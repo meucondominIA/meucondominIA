@@ -1,3 +1,12 @@
+"""Adapter de entrada do Z-PRO (camada anti-corrupção).
+
+Transforma o JSON cru do webhook do Z-PRO num objeto interno tipado
+(`IncomingMessage`) — a única coisa que o resto do sistema conhece.
+Quando migrarmos para o WhatsApp oficial (WABA), só este arquivo muda.
+
+Baseado no payload real capturado em 28/06/2026 (canal type="baileys").
+Doc Pydantic v2 — alias: https://docs.pydantic.dev/latest/concepts/alias/
+"""
 from __future__ import annotations
 import re
 from enum import Enum
@@ -11,10 +20,10 @@ class _ZproBase(BaseModel):
     model_config = ConfigDict(extra="ignore", populate_by_name=True)
 
 class ZproKey(_ZproBase):
-    id: str  
-    from_me: bool = Field(default=False, validate_alias="fromMe")
-    remote_jid: str | None = Field(default=None, validade_alias="remoteJid")
-    sender_pn: str | None = None   
+    id: str                                                     # ID da mensagem -> idempotência/dedup
+    from_me: bool = Field(default=False, validation_alias="fromMe")
+    remote_jid: str | None = Field(default=None, validation_alias="remoteJid")  # é LID, NÃO telefone
+    sender_pn: str | None = None                                # "555592372732@s.whatsapp.net" (fallback)
 
 class ZproExtendedText(_ZproBase):
     text: str | None = None
@@ -32,7 +41,7 @@ class ZproMsg(_ZproBase):
 class ZproWhatsapp(_ZproBase):
     id: int | None = None
     name: str | None = None
-    type: str | None = None      # "baileys" agora; "waba"/oficial depois -> self-describe p/ migração
+    type: str | None = None  
 
 
 class ZproContact(_ZproBase):
@@ -101,7 +110,9 @@ def _extract_text(message: ZproMessageContent | None) -> str | None:
         return message.conversation
     if message.extended_text_message and message.extended_text_message.text:
         return message.extended_text_message.text
-    
+    return None
+
+
 def parse_zpro_webhook(raw: dict) -> IncomingMessage:
     """Valida o corpo do webhook e converte no modelo interno.
 
