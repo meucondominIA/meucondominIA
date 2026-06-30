@@ -1,0 +1,10 @@
+# Dependências de DESENVOLVIMENTO — ferramentas que rodam só na sua máquina,
+# nunca no servidor de produção.
+#
+# A linha "-r requirements.txt" puxa também as deps de runtime, então
+#   pip install -r requirements-dev.txt
+# monta o ambiente completo de dev de uma vez só.
+-r requirements.txt
+
+pytest   # framework de testes
+ruff     # linter + formatador (rápido, escrito em Rust)
