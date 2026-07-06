@@ -6,9 +6,10 @@ Quando migrarmos para o WhatsApp oficial (WABA), só este arquivo muda.
 
 Baseado no payload real capturado em 28/06/2026 (canal type="baileys").
 Doc Pydantic v2 — alias: https://docs.pydantic.dev/latest/concepts/alias/
+
+pydantic -> valida/coeage -> objeto tipado
 """
 
-from __future__ import annotations
 import re
 from enum import Enum
 from pydantic import BaseModel, ConfigDict, Field
@@ -18,13 +19,14 @@ from pydantic import BaseModel, ConfigDict, Field
 # ____________________----------------_______________---------------________
 
 
+#Zpro* espelham o payload
 class _ZproBase(BaseModel):
-    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+    model_config = ConfigDict(extra="ignore", validate_by_name=True)
 
 
 class ZproKey(_ZproBase):
     id: str  # ID da mensagem -> idempotência/dedup
-    from_me: bool = Field(default=False, validation_alias="fromMe")
+    from_me: bool = Field(default=False, validation_alias="fromMe") #camelCase -> snake_case
     remote_jid: str | None = Field(
         default=None, validation_alias="remoteJid"
     )  # é LID, NÃO telefone
@@ -91,7 +93,7 @@ class MessageType(str, Enum):
     TEXT = "text"
     UNSUPPORTED = "unsupported"  # áudio, imagem, etc. — tratamos na 2.x
 
-
+#Contrato/Resultado
 class IncomingMessage(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -111,12 +113,13 @@ class IncomingMessage(BaseModel):
     raw: dict
 
 
-# payload cri -> IncomingMessage (com os filtros)
+# payload cri -> IncomingMess(com os filtros)
 # ___________-------------------________________-----------------------
 
 
 class IgnoreMessage(Exception):
     """Mensagem que não deve ser processada (eco, grupo, evento não-message, sem telefone)."""
+    """Se usasse um Exception genérico pro ignorar, ele cairia no mesmo balde do algo quebrou — e você não conseguiria distinguir pulei de propósito de deu ruim"""
 
 
 def normalize_phone(value: str | None) -> str | None:
@@ -152,6 +155,9 @@ def parse_zpro_webhook(raw: dict) -> IncomingMessage:
 
     if msg.key.from_me:
         raise IgnoreMessage("eco da própria resposta (fromMe=true)")
+    """morador "Oi" (fromMe=false) → bot responde "Olá!"
+       → webhook da resposta (fromMe=true) → SEM filtro: bot responde de novo
+       → webhook dessa (fromMe=true) → responde de novo → 🔁 loop"""
     if ticket and ticket.is_group:
         raise IgnoreMessage("mensagem de grupo")
 

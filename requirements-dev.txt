@@ -8,3 +8,4 @@
 
 pytest   # framework de testes
 ruff     # linter + formatador (rápido, escrito em Rust)
+httpx    # cliente HTTP usado pelo TestClient do FastAPI/Starlette
