@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 
 import webhook
 from config import settings
+from dedup import StatusEvento
 from main import app
 
 client = TestClient(app)
@@ -59,17 +60,19 @@ def _payload(*, msg_id="MSG-1", from_me=False, is_group=False, text="Oi"):
 
 @pytest.fixture
 def mocks(monkeypatch):
-    """Substitui pool, dedup e processamento; devolve (registrar, processar)."""
+    """Substitui pool, dedup e processamento; devolve (registrar, processar, marcar)."""
     registrar = AsyncMock(return_value=True)
     processar = AsyncMock()
+    marcar = AsyncMock()
     monkeypatch.setattr(webhook, "get_pool", lambda: _FakePool())
     monkeypatch.setattr(webhook, "registrar_mensagem", registrar)
     monkeypatch.setattr(webhook, "processar_mensagem", processar)
-    return registrar, processar
+    monkeypatch.setattr(webhook, "marcar_status", marcar)
+    return registrar, processar, marcar
 
 
 def test_segredo_errado_retorna_404(mocks):
-    registrar, processar = mocks
+    registrar, processar, marcar = mocks
     resp = client.post("/webhook/segredo-errado", json=_payload())
     assert resp.status_code == 404
     registrar.assert_not_awaited()
@@ -77,7 +80,7 @@ def test_segredo_errado_retorna_404(mocks):
 
 
 def test_mensagem_nova_processa(mocks):
-    registrar, processar = mocks
+    registrar, processar, marcar = mocks
     registrar.return_value = True  # não é duplicata
     resp = client.post(
         f"/webhook/{settings.webhook_secret}", json=_payload(msg_id="NOVA-1")
@@ -90,7 +93,7 @@ def test_mensagem_nova_processa(mocks):
 
 
 def test_duplicata_nao_processa(mocks):
-    registrar, processar = mocks
+    registrar, processar, marcar = mocks
     registrar.return_value = False  # já existia -> ON CONFLICT DO NOTHING
     resp = client.post(
         f"/webhook/{settings.webhook_secret}", json=_payload(msg_id="DUP-1")
@@ -101,7 +104,7 @@ def test_duplicata_nao_processa(mocks):
 
 
 def test_eco_fromme_ignorado(mocks):
-    registrar, processar = mocks
+    registrar, processar, marcar = mocks
     resp = client.post(
         f"/webhook/{settings.webhook_secret}", json=_payload(from_me=True)
     )
@@ -111,7 +114,7 @@ def test_eco_fromme_ignorado(mocks):
 
 
 def test_grupo_ignorado(mocks):
-    registrar, processar = mocks
+    registrar, processar, marcar = mocks
     resp = client.post(
         f"/webhook/{settings.webhook_secret}", json=_payload(is_group=True)
     )
@@ -121,7 +124,7 @@ def test_grupo_ignorado(mocks):
 
 
 def test_payload_invalido_nao_quebra(mocks):
-    registrar, processar = mocks
+    registrar, processar, marcar = mocks
     # method=message mas key.id ausente -> pydantic.ValidationError (tratada, vira 200).
     resp = client.post(
         f"/webhook/{settings.webhook_secret}",
@@ -130,3 +133,63 @@ def test_payload_invalido_nao_quebra(mocks):
     assert resp.status_code == 200
     registrar.assert_not_awaited()
     processar.assert_not_awaited()
+
+
+def test_json_invalido_ignorado(mocks):
+    registrar, processar, marcar = mocks
+    # corpo cru que não é JSON -> JSONDecodeError no parse -> 200 sem persistir.
+    resp = client.post(
+        f"/webhook/{settings.webhook_secret}", content=b"isso nao e json {{{"
+    )
+    assert resp.status_code == 200
+    registrar.assert_not_awaited()
+    processar.assert_not_awaited()
+
+
+def test_evento_nao_message_ignorado(mocks):
+    registrar, processar, marcar = mocks
+    # JSON válido mas method != "message" -> IgnoreMessage -> 200 sem persistir.
+    resp = client.post(
+        f"/webhook/{settings.webhook_secret}", json={"method": "presence"}
+    )
+    assert resp.status_code == 200
+    registrar.assert_not_awaited()
+    processar.assert_not_awaited()
+
+
+def test_falha_persistencia_retorna_503(mocks):
+    registrar, processar, marcar = mocks
+    # INSERT estoura -> a rota NÃO pode responder 2xx (o provedor precisa poder reenviar).
+    registrar.side_effect = Exception("falha simulada no INSERT")
+    resp = client.post(
+        f"/webhook/{settings.webhook_secret}", json=_payload(msg_id="ERRO-1")
+    )
+    assert resp.status_code == 503
+    registrar.assert_awaited_once()  # tentou persistir
+    processar.assert_not_awaited()  # não agenda processamento sem durabilidade
+
+
+def test_processamento_ok_marca_processado(mocks):
+    registrar, processar, marcar = mocks
+    resp = client.post(
+        f"/webhook/{settings.webhook_secret}", json=_payload(msg_id="OK-1")
+    )
+    assert resp.status_code == 200
+    processar.assert_awaited_once()
+    marcar.assert_awaited_once()
+    # marcar_status(conn, message_id, status)
+    assert marcar.await_args.args[1] == "OK-1"
+    assert marcar.await_args.args[2] is StatusEvento.PROCESSADO
+
+
+def test_processamento_falha_marca_falhou(mocks):
+    registrar, processar, marcar = mocks
+    # Falha no background é PÓS-ACK: a resposta segue 200; a linha vira 'falhou'.
+    processar.side_effect = Exception("boom no processamento")
+    resp = client.post(
+        f"/webhook/{settings.webhook_secret}", json=_payload(msg_id="FALHA-1")
+    )
+    assert resp.status_code == 200
+    processar.assert_awaited_once()
+    marcar.assert_awaited_once()
+    assert marcar.await_args.args[2] is StatusEvento.FALHOU

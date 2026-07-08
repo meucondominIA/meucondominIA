@@ -2,7 +2,10 @@
   "permissions": {
     "allow": [
       "mcp__claude_ai_Supabase__execute_sql",
-      "WebFetch(domain:pydantic.dev)"
+      "WebFetch(domain:pydantic.dev)",
+      "Bash(pip list *)",
+      "Bash(python -m pytest -q)",
+      "Bash(ruff check *)"
     ]
   }
 }

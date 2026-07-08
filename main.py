@@ -1,16 +1,19 @@
-"""Bootstrap do serviço (Fase 2.0 · Peça C).
+"""Bootstrap do serviço.
 
-App FastAPI com lifespan: abre o pool asyncpg no startup e fecha no shutdown.
+App FastAPI com lifespan: abre o pool asyncpg e liga o sweeper no startup;
+no shutdown cancela o sweeper ANTES de fechar o pool (ele usa o pool).
 Doc: https://fastapi.tiangolo.com/advanced/events/ (lifespan substitui on_event).
 """
 
+import asyncio
 import logging
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI
 
 from db import criar_pool, fechar_pool
+from sweeper import rodar_sweeper
 from webhook import router
 
 logging.basicConfig(level=logging.INFO)
@@ -18,9 +21,13 @@ logging.basicConfig(level=logging.INFO)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    await criar_pool()  # startup
+    await criar_pool()
+    sweeper = asyncio.create_task(rodar_sweeper(), name="sweeper")
     yield
-    await fechar_pool()  # shutdown
+    sweeper.cancel()
+    with suppress(asyncio.CancelledError):
+        await sweeper
+    await fechar_pool()
 
 
 app = FastAPI(title="Assistente Condomínios", lifespan=lifespan)

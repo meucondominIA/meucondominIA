@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 
 import asyncpg
@@ -10,14 +11,24 @@ logger = logging.getLogger(__name__)
 _pool: asyncpg.Pool | None = None
 
 
+async def _registrar_codecs(conn: asyncpg.Connection) -> None:
+    await conn.set_type_codec(
+        "jsonb",
+        encoder=json.dumps,
+        decoder=json.loads,
+        schema="pg_catalog",
+    )
+
+
 async def criar_pool() -> None:
-    """Abre o pool. Chamado UMA vez, no startup da aplicação.""" 
+    """Abre o pool. Chamado UMA vez, no startup da aplicação."""
     global _pool #altera a variavel do modulo, não local, pro get_pool() achar
     if _pool is None:
         _pool = await asyncpg.create_pool(
             dsn=settings.database_url,
             min_size=settings.pool_min_size,
             max_size=settings.pool_max_size,
+            init=_registrar_codecs,
         )
 
 
