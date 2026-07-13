@@ -205,7 +205,7 @@ O pool de conexões abre uma vez no startup e fecha no shutdown, via
 [lifespan do FastAPI](https://fastapi.tiangolo.com/advanced/events/) (o
 substituto moderno dos eventos `on_event`). O
 [pool do asyncpg](https://magicstack.github.io/asyncpg/current/api/index.html#connection-pools)
-usa `min_size=1, max_size=20` — dimensionado para a VPS de 1 vCPU com a regra
+usa `min_size=1, max_size=20` — dimensionado para a regra
 `workers × max_size ≤ ~40`, respeitando o limite do Supabase free via Session
 pooler. O shutdown tem timeout: se `pool.close()` passar de 10s, `terminate()`
 derruba as conexões à força em vez de travar o deploy.

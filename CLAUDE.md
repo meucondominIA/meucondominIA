@@ -54,6 +54,40 @@ Em troca, combinamos:
 - Conexão via Session pooler (porta 5432); `DATABASE_URL` com `?sslmode=require`.
 - Webhook do ZPRO não tem assinatura → proteger por URL secreta (`webhook_secret`).
 
+## Contrato com o Z-PRO (whitelabel Magniia) — verificado por teste real em 09/07/2026
+> Fatos observados, não derivam do código. Payload de ENTRADA real: `json_ZPRO` (raiz do repo).
+
+**Envio (API externa v2):**
+- `POST {ZPRO_API_URL}/` com header `Authorization: Bearer {ZPRO_API_TOKEN}` (env vars já
+  existentes; `ZPRO_API_URL` inclui o ApiID).
+- Body: `{"body": "<texto>", "number": "<dígitos com DDI>", "externalKey": "<chave>",
+  "isClosed": false}` — endereça POR NÚMERO e abre/reutiliza ticket sozinho.
+- Resposta: `{"success":true,"data":{"message":"Message sent successfully","ticketId":N}}`.
+  **Não devolve id de mensagem do WhatsApp**, só `ticketId` — que se REPETE por conversa:
+  nunca gravar em `mensagens.message_id` (violaria o índice único); só logar.
+- `externalKey`: **NÃO deduplica** (verificado 09/07/2026: dois envios com a mesma chave,
+  ambos entregues). Enviamos o `message_id` da entrada mesmo assim, só como correlação/
+  rastreio — a idempotência de envio é 100% responsabilidade NOSSA (guarda no banco via
+  `em_resposta_a`; janela residual entre envio e INSERT da saída é aceita e documentada).
+
+**Pegadinhas conhecidas:**
+- `GET /params/` responde `403 "Token was not provided."` MESMO com Bearer válido (auth
+  dessa rota difere do POST). Não usar como healthcheck nem para validar credencial.
+- Nono dígito: **resolvido em 13/07/2026** — testados os dois formatos por envio real
+  (`5555992372732` com 9, e `555592372732` sem 9, o mesmo formato do `contact.number`
+  inbound); **os dois entregam**. Não precisa de normalização de nono dígito no envio.
+- "Aguardando mensagem. Essa ação pode levar alguns instantes." no WhatsApp = placeholder
+  de decifração E2E, comum via baileys; some quando a sessão sincroniza (ex.: destinatário
+  responde). Comportamento do canal, não bug nosso
+  (https://faq.whatsapp.com/3398056720476987/?locale=pt_BR). WABA oficial não sofre disso.
+- Retry do Z-PRO em não-2xx do NOSSO webhook: **resolvido em 13/07/2026 — NÃO reenvia.**
+  Teste real: túnel público (ngrok) + endpoint-armadilha (sempre 500, log completo) no
+  lugar do webhook oficial; duas mensagens reais enviadas via WhatsApp, cada uma gerou
+  entregas **simultâneas** (mesmo segundo, mesmo `message_id`) em paths diferentes — são
+  múltiplas configurações de webhook no painel do Magniia disparando em paralelo, não
+  retry. Nenhuma tentativa isolada foi repetida depois de receber 500 (~9min de janela
+  observada).
+
 ## Convenções
 - Type hints sempre; Pydantic v2 (`model_validate`, `ConfigDict`, `validation_alias`).
 - SQL sempre parametrizado (`$1`); `async`/`await` p/ I/O.

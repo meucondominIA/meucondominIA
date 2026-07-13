@@ -15,6 +15,7 @@ from fastapi import FastAPI
 from db import criar_pool, fechar_pool
 from sweeper import rodar_sweeper
 from webhook import router
+from zpro_client import criar_cliente, fechar_cliente
 
 logging.basicConfig(level=logging.INFO)
 
@@ -22,11 +23,13 @@ logging.basicConfig(level=logging.INFO)
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await criar_pool()
+    await criar_cliente()
     sweeper = asyncio.create_task(rodar_sweeper(), name="sweeper")
     yield
     sweeper.cancel()
     with suppress(asyncio.CancelledError):
         await sweeper
+    await fechar_cliente()
     await fechar_pool()
 
 

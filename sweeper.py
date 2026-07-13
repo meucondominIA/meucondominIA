@@ -20,7 +20,7 @@ import logging
 from config import settings
 from db import get_pool
 from dedup import StatusEvento, marcar_status
-from webhook import processar_mensagem
+from processador import processar_mensagem
 from zpro_models import parse_zpro_webhook
 
 logger = logging.getLogger(__name__)

@@ -13,6 +13,9 @@ class Settings(BaseSettings):
     database_url: str
     webhook_secret: str
 
+    zpro_api_url: str
+    zpro_api_token: str
+
     pool_min_size: int = 1
     pool_max_size: int = 20
 

@@ -179,3 +179,32 @@ def test_parametros_da_busca(monkeypatch, mocks):
         float(settings.sweeper_grace_seconds),
         settings.sweeper_batch_size,
     )
+
+
+def test_rodar_sweeper_continua_apos_erro_em_um_ciclo(monkeypatch):
+    varrer = AsyncMock(side_effect=[Exception("boom no ciclo"), 0])
+
+    async def fake_sleep(_):
+        if varrer.await_count >= 2:
+            raise asyncio.CancelledError  # encerra o loop no 2º ciclo
+
+    monkeypatch.setattr(sweeper, "varrer_pendentes", varrer)
+    monkeypatch.setattr("asyncio.sleep", fake_sleep)
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(sweeper.rodar_sweeper())
+    assert varrer.await_count == 2  # o erro no 1º ciclo não derrubou o loop
+
+
+def test_rodar_sweeper_encerra_no_cancelamento(monkeypatch):
+    varrer = AsyncMock(return_value=0)
+
+    async def fake_sleep(_):
+        raise asyncio.CancelledError  # simula o cancel do shutdown
+
+    monkeypatch.setattr(sweeper, "varrer_pendentes", varrer)
+    monkeypatch.setattr("asyncio.sleep", fake_sleep)
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(sweeper.rodar_sweeper())
+    varrer.assert_awaited_once()

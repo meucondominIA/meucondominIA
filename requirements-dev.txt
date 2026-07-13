@@ -6,6 +6,7 @@
 # monta o ambiente completo de dev de uma vez só.
 -r requirements.txt
 
-pytest   # framework de testes
-ruff     # linter + formatador (rápido, escrito em Rust)
-httpx    # cliente HTTP usado pelo TestClient do FastAPI/Starlette
+pytest          # framework de testes
+ruff            # linter + formatador (rápido, escrito em Rust)
+httpx           # cliente HTTP usado pelo TestClient do FastAPI/Starlette
+testcontainers  # sobe um Postgres efêmero em Docker p/ os testes de integração (pytest -m integration)

@@ -7,6 +7,7 @@ fakes/mocks. O TestClient é usado SEM 'with' de propósito — assim o lifespan
 Doc TestClient: https://fastapi.tiangolo.com/reference/testclient/
 """
 
+import asyncio
 from unittest.mock import AsyncMock
 
 import pytest
@@ -16,6 +17,7 @@ import webhook
 from config import settings
 from dedup import StatusEvento
 from main import app
+from zpro_models import parse_zpro_webhook
 
 client = TestClient(app)
 
@@ -193,3 +195,16 @@ def test_processamento_falha_marca_falhou(mocks):
     processar.assert_awaited_once()
     marcar.assert_awaited_once()
     assert marcar.await_args.args[2] is StatusEvento.FALHOU
+
+
+def test_marcar_status_que_estoura_nao_propaga(mocks):
+    # O desfecho já rodou; se marcar_status falha, é secundário -> só loga, não sobe.
+    registrar, processar, marcar = mocks
+    marcar.side_effect = Exception("falha ao marcar status")
+    msg = parse_zpro_webhook(_payload(msg_id="MARCA-1"))
+
+    asyncio.run(webhook._processar_e_marcar(msg))  # não deve levantar
+
+    processar.assert_awaited_once()
+    marcar.assert_awaited_once()
+    assert marcar.await_args.args[2] is StatusEvento.PROCESSADO

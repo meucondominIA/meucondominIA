@@ -23,20 +23,12 @@ from pydantic import ValidationError
 from config import settings
 from db import get_pool
 from dedup import StatusEvento, marcar_status, registrar_mensagem
+from processador import processar_mensagem
 from zpro_models import IgnoreMessage, IncomingMessage, parse_zpro_webhook
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-
-async def processar_mensagem(msg: IncomingMessage) -> None:
-
-    logger.info(
-        "processar_mensagem (stub): message_id=%s phone=%s",
-        msg.message_id,
-        msg.phone,
-    )
 
 
 async def _processar_e_marcar(msg: IncomingMessage) -> None:
