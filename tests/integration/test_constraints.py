@@ -1,44 +1,24 @@
 """Integração: prova que as constraints da Fase 1 barram de verdade no Postgres.
 
-Cada teste roda numa transação revertida no fim (isolamento). A violação
-esperada é envolta num savepoint (async with conn.transaction()) para não
-abortar a transação externa. As conexões registram o mesmo codec jsonb do
-db.py, então os repositórios reais rodam como em produção.
+Cada teste roda via `rodar_tx` (conftest): transação revertida no fim
+(isolamento) e os mesmos codecs do db.py, então os repositórios reais rodam
+como em produção. A violação esperada é envolta num savepoint
+(async with conn.transaction()) para não abortar a transação externa.
 
 Marcados 'integration' -> deselecionados no `pytest` padrão; rode com
 `pytest -m integration` (precisa de Docker).
 """
 
-import asyncio
-
 import asyncpg
 import pytest
 
-import db
 from dedup import registrar_mensagem
 from mensagens import registrar_saida, upsert_conversa_ativa
 
 pytestmark = pytest.mark.integration
 
 
-def _run(dsn, body):
-    async def _corpo():
-        conn = await asyncpg.connect(dsn)
-        await db._registrar_codecs(conn)
-        try:
-            tr = conn.transaction()
-            await tr.start()
-            try:
-                await body(conn)
-            finally:
-                await tr.rollback()
-        finally:
-            await conn.close()
-
-    asyncio.run(_corpo())
-
-
-def test_uq_mensagens_message_id_bloqueia_duplicata(pg_dsn):
+def test_uq_mensagens_message_id_bloqueia_duplicata(rodar_tx):
     async def body(conn):
         cid = await upsert_conversa_ativa(conn, "5511999990001")
         await conn.execute(
@@ -63,10 +43,10 @@ def test_uq_mensagens_message_id_bloqueia_duplicata(pg_dsn):
             cid,
         )
 
-    _run(pg_dsn, body)
+    rodar_tx(body)
 
 
-def test_uq_mensagens_em_resposta_a_bloqueia_segunda_saida(pg_dsn):
+def test_uq_mensagens_em_resposta_a_bloqueia_segunda_saida(rodar_tx):
     async def body(conn):
         cid = await upsert_conversa_ativa(conn, "5511999990002")
         entrada = await conn.fetchval(
@@ -92,10 +72,10 @@ def test_uq_mensagens_em_resposta_a_bloqueia_segunda_saida(pg_dsn):
         )
         assert n == 1
 
-    _run(pg_dsn, body)
+    rodar_tx(body)
 
 
-def test_uq_conversas_telefone_ativa_uma_por_vez(pg_dsn):
+def test_uq_conversas_telefone_ativa_uma_por_vez(rodar_tx):
     async def body(conn):
         id1 = await upsert_conversa_ativa(conn, "5511999990003")
         id2 = await upsert_conversa_ativa(conn, "5511999990003")
@@ -118,10 +98,10 @@ def test_uq_conversas_telefone_ativa_uma_por_vez(pg_dsn):
             "5511999990003",
         )
 
-    _run(pg_dsn, body)
+    rodar_tx(body)
 
 
-def test_chk_mensagens_assistente_exige_conteudo(pg_dsn):
+def test_chk_mensagens_assistente_exige_conteudo(rodar_tx):
     async def body(conn):
         cid = await upsert_conversa_ativa(conn, "5511999990004")
 
@@ -141,10 +121,10 @@ def test_chk_mensagens_assistente_exige_conteudo(pg_dsn):
             cid,
         )
 
-    _run(pg_dsn, body)
+    rodar_tx(body)
 
 
-def test_webhook_events_dedup_atomico(pg_dsn):
+def test_webhook_events_dedup_atomico(rodar_tx):
     async def body(conn):
         assert await registrar_mensagem(conn, "W-1", {"a": 1}) is True
         assert await registrar_mensagem(conn, "W-1", {"a": 2}) is False  # ON CONFLICT
@@ -161,4 +141,4 @@ def test_webhook_events_dedup_atomico(pg_dsn):
         )
         assert payload == {"a": 1}
 
-    _run(pg_dsn, body)
+    rodar_tx(body)

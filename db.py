@@ -3,6 +3,7 @@ import json
 import logging
 
 import asyncpg
+from pgvector.asyncpg import register_vector
 
 from config import settings
 
@@ -18,6 +19,7 @@ async def _registrar_codecs(conn: asyncpg.Connection) -> None:
         decoder=json.loads,
         schema="pg_catalog",
     )
+    await register_vector(conn, schema=settings.pgvector_schema)
 
 
 async def criar_pool() -> None:

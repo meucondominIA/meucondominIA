@@ -15,6 +15,8 @@ import pathlib
 import asyncpg
 import pytest
 
+import db
+
 try:
     from testcontainers.core.container import DockerContainer
 
@@ -74,3 +76,27 @@ def pg_dsn():
         yield dsn
     finally:
         container.stop()
+
+
+@pytest.fixture
+def rodar_tx(pg_dsn):
+    """Executa `body(conn)` com os codecs do db.py, numa transação revertida no
+    fim — cada teste enxerga o banco limpo (isolamento)."""
+
+    def _rodar(body):
+        async def _corpo():
+            conn = await asyncpg.connect(pg_dsn)
+            await db._registrar_codecs(conn)
+            try:
+                tr = conn.transaction()
+                await tr.start()
+                try:
+                    await body(conn)
+                finally:
+                    await tr.rollback()
+            finally:
+                await conn.close()
+
+        asyncio.run(_corpo())
+
+    return _rodar

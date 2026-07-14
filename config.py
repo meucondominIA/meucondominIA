@@ -16,6 +16,13 @@ class Settings(BaseSettings):
     zpro_api_url: str
     zpro_api_token: str
 
+    openai_api_key: str
+    embedding_model: str = "text-embedding-3-large"
+    embedding_dimensions: int = 3072
+    rag_top_k: int = 5
+    openai_timeout_seconds: float = 30.0
+    pgvector_schema: str = "extensions"
+
     pool_min_size: int = 1
     pool_max_size: int = 20
 

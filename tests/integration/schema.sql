@@ -1,11 +1,17 @@
 -- Bootstrap de schema APENAS para os testes de integração (testcontainers).
--- Reproduz fielmente as tabelas sob teste (conversas, webhook_events, mensagens)
--- e seus índices/constraints, copiados das migrations reais em supabase/migrations/.
--- Fora do escopo (não afetam estas constraints): pgvector, pg_cron, papéis do
--- Supabase, RLS policies. O superusuário do container ignora RLS de qualquer modo.
+-- Reproduz fielmente as tabelas sob teste (conversas, webhook_events, mensagens,
+-- regras) e seus índices/constraints, copiados das migrations reais em
+-- supabase/migrations/. Fora do escopo (não afetam estas constraints): pg_cron,
+-- papéis do Supabase, RLS policies. O superusuário do container ignora RLS de
+-- qualquer modo.
 -- SE a DDL dessas tabelas mudar numa migration, ESTE arquivo precisa acompanhar.
 
--- Stubs mínimos só para as FKs de conversas resolverem (colunas reais irrelevantes aqui).
+-- pgvector no MESMO schema do Supabase (extensions), para o teste exercitar a
+-- resolução do tipo fora do default 'public' — igual à produção.
+create schema extensions;
+create extension vector with schema extensions;
+
+-- Stubs mínimos só para as FKs resolverem (colunas reais irrelevantes aqui).
 create table public.condominios (id uuid primary key default gen_random_uuid());
 create table public.moradores (id uuid primary key default gen_random_uuid());
 
@@ -71,3 +77,39 @@ create index idx_mensagens_conversa_created
   on public.mensagens (conversa_id, created_at);
 create unique index uq_conversas_telefone_ativa
   on public.conversas (telefone) where (status = 'ativa');
+
+-- regras: base (baseline) + fonte/documento obrigatórios (20260714172922)
+create table public.regras (
+  id uuid primary key default gen_random_uuid(),
+  condominio_id uuid references public.condominios (id) on delete cascade,
+  escopo text not null check (escopo in ('geral', 'especifico')),
+  conteudo text not null,
+  fonte text,
+  metadata jsonb not null default '{}'::jsonb check (jsonb_typeof(metadata) = 'object'),
+  embedding extensions.vector(3072),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint chk_regras_escopo check (
+    (escopo = 'especifico' and condominio_id is not null)
+    or (escopo = 'geral' and condominio_id is null)
+  )
+);
+create index idx_regras_condominio_id on public.regras (condominio_id);
+create trigger trg_regras_updated_at
+  before update on public.regras
+  for each row execute function public.set_updated_at();
+
+alter table public.regras
+  alter column fonte set not null;
+alter table public.regras
+  add constraint chk_regras_fonte_nao_vazia check (fonte ~ '\S');
+
+alter table public.regras
+  add column documento text;
+alter table public.regras
+  alter column documento set not null;
+alter table public.regras
+  add constraint chk_regras_documento_nao_vazio check (documento ~ '\S');
+
+create index idx_regras_condominio_documento
+  on public.regras (condominio_id, documento);
