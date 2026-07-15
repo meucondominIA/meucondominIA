@@ -12,6 +12,7 @@ from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI
 
+import embeddings
 from db import criar_pool, fechar_pool
 from sweeper import rodar_sweeper
 from webhook import router
@@ -24,11 +25,13 @@ logging.basicConfig(level=logging.INFO)
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await criar_pool()
     await criar_cliente()
+    await embeddings.criar_cliente()
     sweeper = asyncio.create_task(rodar_sweeper(), name="sweeper")
     yield
     sweeper.cancel()
     with suppress(asyncio.CancelledError):
         await sweeper
+    await embeddings.fechar_cliente()
     await fechar_cliente()
     await fechar_pool()
 

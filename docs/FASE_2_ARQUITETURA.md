@@ -98,27 +98,40 @@ Módulos novos, todos flat na raiz como os existentes: `embeddings.py`, `chunker
 O formato de cada contrato: **o que entra, o que sai, o que a peça garante — e o que
 ela deliberadamente NÃO decide** (isso fica com o responsável pelo passo).
 
-### 4.1 `embeddings.py` — adapter da OpenAI (a fronteira, §6)
+### 4.1 `embeddings.py` — adapter da OpenAI (a fronteira, §6) — **IMPLEMENTADO (passo 2)**
 
 - **Papel:** única porta do sistema para a API de embeddings. Espelha o padrão do
   `zpro_client.py`: cliente com ciclo `criar_cliente()/fechar_cliente()/get_cliente()`
   criado no startup; o core nunca vê tipos do SDK da OpenAI.
-- **Contrato:**
+- **Contrato (final — difere do proposto na 1ª versão deste doc, que não tinha
+  `caminho`):**
   ```python
-  async def gerar_embeddings(textos: list[str]) -> list[list[float]]
+  Caminho = Literal["busca", "ingestao"]
+
+  async def gerar_embeddings(textos: list[str], *, caminho: Caminho) -> list[list[float]]
   ```
   Entra uma lista de textos (1 para a pergunta na busca; N para o lote da ingestão —
   a API aceita array de entradas numa chamada:
   https://developers.openai.com/api/docs/guides/embeddings). Sai uma lista de vetores
-  de 3072 floats, **na mesma ordem** (a resposta traz `index` por item:
-  https://developers.openai.com/api/docs/api-reference/embeddings). Exceções sobem —
-  quem decide o que fazer é o chamador (ingestão aborta a transação do documento;
-  busca propaga).
-- **Garante:** modelo e dimensões fixados por config (`text-embedding-3-large`,
-  3072), timeout explícito (o default do SDK é 10 minutos — inaceitável num caminho
-  de chat; verificado em https://github.com/openai/openai-python).
+  de 3072 floats, **na mesma ordem** — remontada pelo `index` de cada item
+  (https://developers.openai.com/api/docs/api-reference/embeddings); a doc **não**
+  garante a ordem do array, então não confiamos nela. Exceções sobem — quem decide o
+  que fazer é o chamador (ingestão aborta a transação do documento; busca propaga).
+
+  `caminho` é **obrigatório e keyword-only, sem default**: busca e ingestão têm perfis
+  de timeout/retry opostos (A6) e um lote de ingestão rodando com o timeout da busca
+  quebraria em produção. Aplicado por chamada via `client.with_options(...)`, que
+  reutiliza o mesmo cliente HTTP (verificado no fonte do SDK 2.45.0).
+- **Garante:** modelo e dimensões fixados por config; timeout/retry explícitos por
+  caminho; ordem da saída; e as invariantes da resposta (contagem == entrada, índices
+  cobrindo `0..n-1`, dimensão == config) — violação vira `EmbeddingRespostaError`,
+  exceção de domínio nossa. Erros do SDK (`openai.*`) sobem crus, espelhando o
+  `HTTPStatusError` que o `zpro_client` deixa propagar.
+- **Bordas (defensivas, sem gastar chamada):** lista vazia → `[]`; texto vazio ou só
+  espaços → `ValueError` (a doc proíbe string vazia); acima de 2048 itens →
+  `ValueError` (A4).
 - **Não decide:** tamanho de lote da ingestão, contagem de tokens, uso ou não de
-  `tiktoken` (§10).
+  `tiktoken` (§10, D5).
 
 ### 4.2 `chunker.py` — regimento → chunks citáveis (função pura)
 
@@ -142,7 +155,12 @@ ela deliberadamente NÃO decide** (isso fica com o responsável pelo passo).
   tamanho fixo — um artigo é a unidade natural de citação.
 - **Não decide (fica com o responsável do passo):** granularidade exata (artigo
   inteiro? parágrafo? com overlap?), formato de entrada aceito (txt/markdown; PDF é
-  pré-processamento fora do sistema), como validar o limite de tokens (§10).
+  pré-processamento fora do sistema), como validar o limite de tokens (§10, D5).
+- **Evidência já levantada para o passo 3 (§13), que não decide por ele:** prefixar o
+  título do CAPÍTULO no chunk **não melhorou** o retrieval (hit@k idêntico, distâncias
+  levemente piores) — o artigo puro basta; e o maior artigo real deu 187 tokens contra
+  o teto de 8192, o que torna a contagem exata de tokens (D5) provavelmente
+  desnecessária.
 
 ### 4.3 `regras.py` — repositório (recebe `conn`, como `mensagens.py`)
 
@@ -323,29 +341,31 @@ testável:
 |---|---|---|
 | `requirements.txt` | + `openai` (SDK oficial), + `pgvector` (codec do tipo p/ asyncpg) | https://github.com/openai/openai-python · https://github.com/pgvector/pgvector-python |
 | `db.py` | `_registrar_codecs` passa a registrar também o tipo `vector` via `pgvector.asyncpg.register_vector(conn)` — o hook `init=` do pool já existe e é exatamente o padrão da doc | https://github.com/pgvector/pgvector-python (seção asyncpg: `create_pool(..., init=init)`) |
-| `config.py` | + `openai_api_key`, `embedding_model` (default `text-embedding-3-large`), `embedding_dimensions` (3072), `rag_top_k`, timeout da OpenAI | padrão `pydantic-settings` já em uso |
+| `config.py` | + `openai_api_key`, `embedding_model` (default `text-embedding-3-large`), `embedding_dimensions` (3072), `rag_top_k`, e **4 campos de timeout/retry por caminho** (`openai_timeout_busca_seconds`, `openai_retries_busca`, `openai_timeout_ingestao_seconds`, `openai_retries_ingestao`) — A6. Não existe timeout "base": todo acesso passa por um caminho, e campo de config sem leitor é dívida | padrão `pydantic-settings` já em uso |
 | `main.py` | lifespan cria/fecha o cliente OpenAI junto do pool e do cliente Z-PRO (simetria; o app só consome na Fase 3, mas o ciclo de vida já fica correto) | https://fastapi.tiangolo.com/advanced/events/ |
 | `tests/integration/schema.sql` | ganha a tabela `regras` (cópia fiel da migration, como já é feito p/ as outras 3 tabelas) — a imagem `pgvector/pgvector:pg17` já dá o tipo `vector` | prática já estabelecida no repo (risco de drift já documentado na Fase 1) |
 | `supabase/migrations/` | **proposta de mudança explícita** (§10, D1): endurecer `regras.fonte` para `NOT NULL` — citabilidade como invariante no banco, não promessa no código. Tabela vazia hoje: custo zero | princípio do projeto "garantias no banco" (CLAUDE.md) |
 | `.env` | + `OPENAI_API_KEY` (segredo só no ambiente) | — |
 
-**Atenção do passo 1 (não verificado):** no Supabase a extensão `vector` vive no
-schema `extensions` (baseline: `create extension vector with schema extensions`),
-enquanto a imagem de teste instala em `public`. Não verifiquei se
-`register_vector` do pgvector-python resolve o tipo em schema não-default — o
-responsável do passo 1 valida contra os dois ambientes antes de seguir.
+**Atenção do passo 1 — RESOLVIDO (14/07/2026):** no Supabase a extensão `vector` vive
+no schema `extensions` (baseline: `create extension vector with schema extensions`),
+enquanto a imagem de teste instala em `public`. Verificado: `register_vector` **não**
+resolve o tipo em schema não-default sozinho — sem `schema='extensions'` falha com
+`unknown type: public.vector`. Por isso `db.py` chama
+`register_vector(conn, schema=settings.pgvector_schema)`, e o roundtrip de
+`vector(3072)` está provado por teste de integração contra os dois ambientes.
 
 ## 9. Decisões de arquitetura (com fundamento)
 
 | # | Decisão | Fundamento (oficial) |
 |---|---|---|
 | A1 | **Busca exata, sem índice vetorial** (mantém decisão registrada) | pgvector: exact search = recall perfeito; HNSW/IVFFlat limitam `vector` a 2.000 dims; "if the table is small, a table scan may be faster"; filtro com índice aproximado é pós-scan — https://github.com/pgvector/pgvector |
-| A2 | **Operador `<=>` (cosseno)** na busca | OpenAI recomenda cosseno; embeddings normalizados (norma 1) ⇒ ranking idêntico ao euclidiano — https://developers.openai.com/api/docs/guides/embeddings |
-| A3 | **3072 dims, sem encurtar** (mantém decisão registrada) | `dimensions` permite encurtar se um dia precisar de índice (HNSW ≤ 2000) — a saída existe sem mudar schema hoje; alternativa: `halfvec` indexa até 4.000 dims por expressão — https://developers.openai.com/api/docs/guides/embeddings · https://github.com/pgvector/pgvector |
-| A4 | **Ingestão em lote** (array de entradas numa chamada) | endpoint aceita array; resposta correlaciona por `index` — https://developers.openai.com/api/docs/guides/embeddings (limite exato de itens/tokens por request: **não verificado** — responsável do passo 2/5 confirma) |
+| A2 | **Operador `<=>` (cosseno)** na busca | OpenAI recomenda cosseno; embeddings normalizados (norma 1) ⇒ ranking idêntico ao euclidiano — https://developers.openai.com/api/docs/guides/embeddings. **Verificado empiricamente** (§13): norma L2 medida = 1,0000 |
+| A3 | **3072 dims, sem encurtar** (mantém decisão registrada) | `dimensions` permite encurtar se um dia precisar de índice (HNSW ≤ 2000), mas isso **muda o tipo da coluna e exige reingestão**; `halfvec` indexa até 4.000 dims por índice de expressão **sem mudar o schema** — é a saída mais barata. Supabase confirmado com pgvector **0.8.0** (halfvec existe desde 0.7.0). Tentativa de medir se dimensão menor degrada qualidade **saturou** (§13): não há benefício medido em reduzir hoje — https://developers.openai.com/api/docs/guides/embeddings · https://github.com/pgvector/pgvector |
+| A4 | **Ingestão em lote** (array de entradas numa chamada) | endpoint aceita array; resposta correlaciona por `index`. Limites **VERIFICADOS** em 15/07/2026 (o "não verificado" desta linha morreu aqui): ≤2048 itens/array, ≤8192 tokens/input, ≤300.000 tokens/request, string vazia proibida — https://developers.openai.com/api/reference/resources/embeddings/methods/create. Com a densidade medida (§13), o teto de **tokens** morde antes do de itens (~1886 chunks/chamada); um regimento real cabe em **uma** chamada |
 | A5 | **Codec `vector` no init do pool** (não converter string na mão) | pgvector-python, seção asyncpg — https://github.com/pgvector/pgvector-python |
-| A6 | **SDK oficial com retry nativo; timeout explícito** (default de 10 min derrubado por config) | https://github.com/openai/openai-python |
-| A7 | **Chunking estrutural** (artigo/seção como unidade citável), entrada ≤ 8192 tokens | limite de entrada do modelo — https://developers.openai.com/api/docs/guides/embeddings; a granularidade fina é do passo 3 |
+| A6 | **SDK oficial com retry nativo; timeout e retry explícitos POR CAMINHO** (default de 10 min derrubado por config) | https://github.com/openai/openai-python. Valores **medidos, não arbitrados** (§13): busca **3s + 1 retry**, ingestão **60s + 2 retries**. O timeout do SDK é por tentativa e ele retenta sozinho com backoff. Na busca o 3s é **corte de cauda**, não margem: a latência é bimodal (p50 ~590ms, p95 ~780ms, ~2% travam em 5–6s), e cortar em 3s + retentar chega **antes** de esperar a chamada travada — o 6s inicial era o pior dos mundos (disparava e entregava 6,5s) |
+| A7 | **Chunking estrutural** (artigo/seção como unidade citável), entrada ≤ 8192 tokens | limite de entrada do modelo — https://developers.openai.com/api/docs/guides/embeddings; a granularidade fina é do passo 3. Medido (§13): o maior artigo real deu **187 tokens = 2,3% do limite** — a folga é de 43x |
 | A8 | **Ingestão como CLI**, não rota HTTP | operação administrativa rara no piloto; evita superfície de ataque e upload de arquivo no app (decisão de produto/simplicidade — sem doc externa) |
 | A9 | **Fase termina na costura `busca.py`** — processador segue no eco | `condominio_id` do telefone só existe na Fase 3 (identificação); plugar antes forçaria gambiarra de tenant fixo (decisão de escopo — sem doc externa) |
 
@@ -369,9 +389,18 @@ de destravar os responsáveis:
   distantes demais ("não achei nada relevante")? Importa para a Fase 3 (quando não
   responder). Recomendo: sem limiar na Fase 2; o eval mede a distribuição de
   distâncias e informa o limiar para a Fase 3. *Quem trava: eval.*
+  **⚠️ Alerta medido (§13): limiar global é mais perigoso do que parecia.** As
+  distâncias dos acertos variam 0,332–0,713 e **se sobrepõem** às do top-1 errado
+  (0,707): um corte em ~0,6 mataria uma resposta correta. Se um limiar entrar, tem que
+  ser justificado por dados do eval — nunca por intuição.
 - **D5 — Contagem de tokens no chunker.** `tiktoken` (dependência nova, contagem
   exata) vs. heurística de caracteres (zero dependência; artigos de regimento ficam
   ordens de grandeza abaixo de 8192 tokens). *Quem trava: responsável do passo 3.*
+  **Dados para decidir (§13): a hipótese está confirmada** — texto jurídico PT-BR mede
+  **3,29 chars/token** e o maior artigo real deu 187 tokens (2,3% do teto). Uma guarda
+  de ~16.000 chars/chunk é segura até no pior caso patológico de 2 chars/token e nunca
+  dispara num artigo real (~600 chars). Recomendação: **heurística, sem `tiktoken`** —
+  a dependência não se paga. *A palavra final segue do passo 3.*
 - **D6 — Golden set: tamanho e curadoria.** Quantas perguntas por condomínio (sugiro
   10–20), quem escreve (perguntas reais de morador > paráfrases), formato do arquivo.
   *Quem trava: dono + responsável do passo 7.*
@@ -418,3 +447,38 @@ puras → integração → prova.
 7. **Avaliação** — golden set (D6), `eval/rodar_eval.py`, métricas `hit@k` +
    vazamento = 0; decide D3/D4 com dados; CLI de demo (D7). **Fecha o critério de
    pronto da fase.**
+
+## 13. Fatos medidos (15/07/2026) — empíricos, não derivam de doc
+
+> Medições reais contra a API da OpenAI, feitas ao fechar o passo 2. Aqui só entra o
+> que foi **observado**; o fundamento documental de cada decisão continua no §9.
+> Corpus: regimento sintético realista (12 artigos, estrutura jurídica brasileira) +
+> 20 perguntas no estilo que morador escreve. Método e limitações declarados junto.
+
+| # | Fato medido | Número | Onde impacta |
+|---|---|---|---|
+| M1 | Densidade de token em texto jurídico PT-BR | **3,29 chars/token** (faixa 3,0–4,0) | D5, A7 |
+| M2 | Maior artigo real vs. teto de 8192 tokens/input | **187 tokens = 2,3%** (folga 43x) | D5, A7 |
+| M3 | Qual teto morde primeiro no lote | **tokens** (2048 × 159 = 324k > 300k) → ~1886 chunks/chamada | A4, passo 5 |
+| M4 | Norma L2 do embedding | **1,0000** (e ≈1,0 também em dims reduzidas — a API normaliza no servidor) | A2 |
+| M5 | Latência da busca (1 pergunta), 500 chamadas | p50 **590ms**, p95 **780ms**, cauda bimodal: ~2% travam em **5–6s** | A6 |
+| M6 | Latência da ingestão por lote | 150 chunks **3,8s** · 500 **10,5s** · 1000 **20s** · 1800 **35s** | A6, passo 5 |
+| M7 | Retrieval, perguntas naturais | hit@1 **9/10**, hit@3 **10/10** | critério de pronto |
+| M8 | Retrieval, perguntas de discriminação fina | hit@1 **10/10** | `rag_top_k=5` está folgado |
+| M9 | Capítulo prefixado no chunk | hit@k **idêntico**, distâncias **piores** (0,468 → 0,480) | §4.2, passo 3 |
+| M10 | Distância dos acertos vs. do top-1 errado | acertos **0,332–0,713** · errado **0,707** → **se sobrepõem** | D4 |
+| M11 | Erro de input > 8192 tokens | `openai.BadRequestError` 400, `"Invalid 'input[0]': maximum input length is 8192 tokens."` — identifica o **índice** do item ofensor | passo 5 |
+
+**O que NÃO foi concluído (declarado para não virar falso saber):**
+
+- **Dimensão menor degrada qualidade?** O teste **saturou**: 3072/1536/1024/512/**256**
+  deram hit@1 idêntico, inclusive nas perguntas difíceis. Com 12 candidatos a tarefa é
+  fácil demais para ranquear dimensão. Isso **não prova** que 256 serve em escala — prova
+  que o corpus é pequeno demais para medir. A3 fica como está; reavaliar só com base
+  real e grande.
+- **O corpus é sintético.** M7–M10 usam um regimento escrito para o teste, não os
+  regimentos do piloto. Servem para destravar o passo 3, **não** para fechar o critério
+  de pronto da fase — quem fecha é o eval do passo 7 com documento e perguntas reais.
+- **A latência (M5, M6) foi medida da máquina de dev**, não do VPS de produção (KVM1,
+  1 vCPU, rede diferente). Os 3s da busca têm ~4x de folga sobre o p95 medido justamente
+  para absorver essa diferença.

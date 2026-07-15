@@ -6,5 +6,5 @@ httpx
 pydantic
 pydantic-settings
 python-dotenv
-openai
+openai>=2.45,<3
 pgvector

@@ -20,7 +20,10 @@ class Settings(BaseSettings):
     embedding_model: str = "text-embedding-3-large"
     embedding_dimensions: int = 3072
     rag_top_k: int = 5
-    openai_timeout_seconds: float = 30.0
+    openai_timeout_busca_seconds: float = 3.0
+    openai_retries_busca: int = 1
+    openai_timeout_ingestao_seconds: float = 60.0
+    openai_retries_ingestao: int = 2
     pgvector_schema: str = "extensions"
 
     pool_min_size: int = 1
