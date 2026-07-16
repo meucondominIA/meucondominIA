@@ -11,6 +11,11 @@
 create schema extensions;
 create extension vector with schema extensions;
 
+-- Mesmo search_path da produção (rolconfig do role postgres no Supabase,
+-- verificado no banco real em 16/07/2026): sem 'extensions' no path, o
+-- operador <=> não resolve. Vale para as PRÓXIMAS conexões (as dos testes).
+alter role test set search_path = "$user", public, extensions;
+
 -- Stubs mínimos só para as FKs resolverem (colunas reais irrelevantes aqui).
 create table public.condominios (id uuid primary key default gen_random_uuid());
 create table public.moradores (id uuid primary key default gen_random_uuid());
@@ -113,3 +118,7 @@ alter table public.regras
 
 create index idx_regras_condominio_documento
   on public.regras (condominio_id, documento);
+
+-- embedding obrigatório (20260716145702)
+alter table public.regras
+  alter column embedding set not null;

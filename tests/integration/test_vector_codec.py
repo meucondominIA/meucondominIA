@@ -36,19 +36,35 @@ def test_roundtrip_vector_3072_no_schema_extensions(rodar_tx):
 
 def test_chk_regras_fonte_e_documento_obrigatorios(rodar_tx):
     async def body(conn):
+        # embedding válido: só a constraint sob teste pode falhar em cada INSERT
+        embedding = [1.0] + [0.0] * 3071
         # fonte só com espaços -> CHECK (~ '\S') barra
         with pytest.raises(asyncpg.CheckViolationError):
             async with conn.transaction():
                 await conn.execute(
-                    "insert into regras (escopo, conteudo, fonte, documento) "
-                    "values ('geral', 'x', '   ', 'Lei 4591/64')"
+                    "insert into regras (escopo, conteudo, fonte, documento, embedding) "
+                    "values ('geral', 'x', '   ', 'Lei 4591/64', $1)",
+                    embedding,
                 )
         # sem documento -> NOT NULL barra
         with pytest.raises(asyncpg.NotNullViolationError):
             async with conn.transaction():
                 await conn.execute(
-                    "insert into regras (escopo, conteudo, fonte) "
-                    "values ('geral', 'x', 'Lei 4591/64, Art. 1')"
+                    "insert into regras (escopo, conteudo, fonte, embedding) "
+                    "values ('geral', 'x', 'Lei 4591/64, Art. 1', $1)",
+                    embedding,
+                )
+
+    rodar_tx(body)
+
+
+def test_chk_regras_embedding_obrigatorio(rodar_tx):
+    async def body(conn):
+        with pytest.raises(asyncpg.NotNullViolationError):
+            async with conn.transaction():
+                await conn.execute(
+                    "insert into regras (escopo, conteudo, fonte, documento) "
+                    "values ('geral', 'x', 'Lei 4591/64, Art. 1', 'Lei 4591/64')"
                 )
 
     rodar_tx(body)
