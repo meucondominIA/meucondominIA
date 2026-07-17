@@ -61,7 +61,7 @@ class Chunk(BaseModel):
 
 
 _MARCADOR_ARTIGO = re.compile(
-    r"^(?:Art|ART)(?:igo|IGO)?\.?\s+(\d+)[º°o]?(?:-([A-Z]+))?(?=[\s.–—-]|$)"
+    r"^(?:Art|ART)(?:igo|IGO)?(?:\.\s*|\s+)(\d+)[º°o]?(?:-([A-Z]+))?(?=[\s.:–—-]|$)"
 )
 
 _CABECALHO_ESTRUTURAL = re.compile(
