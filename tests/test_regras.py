@@ -29,12 +29,17 @@ def _chunk(artigo: int) -> Chunk:
 
 
 class _FakeConn:
-    def __init__(self, fetch_result=()):
+    def __init__(self, fetch_result=(), execute_result="DELETE 0"):
         self._fetch_result = list(fetch_result)
+        self._execute_result = execute_result
         self.calls = []
 
     async def executemany(self, query, args):
         self.calls.append(("executemany", query, args))
+
+    async def execute(self, query, *args):
+        self.calls.append(("execute", query, args))
+        return self._execute_result
 
     async def fetch(self, query, *args):
         self.calls.append(("fetch", query, args))
@@ -101,6 +106,55 @@ def test_inserir_preserva_ordem_dos_pares():
         (chunk.fonte, embedding)
         for chunk, embedding in zip(chunks, embeddings, strict=True)
     ]
+
+
+def test_apagar_documento_em_branco_falha_antes_de_tocar_o_banco():
+    conn = _FakeConn()
+    with pytest.raises(ValueError, match="documento em branco"):
+        asyncio.run(
+            regras.apagar_regras_do_documento(
+                conn, condominio_id=CONDOMINIO_ID, documento="   "
+            )
+        )
+    assert conn.calls == []
+
+
+def test_apagar_usa_comparacao_null_safe_e_devolve_a_contagem_do_tag():
+    conn = _FakeConn(execute_result="DELETE 3")
+    apagadas = asyncio.run(
+        regras.apagar_regras_do_documento(
+            conn, condominio_id=CONDOMINIO_ID, documento="Regimento Teste"
+        )
+    )
+    assert apagadas == 3
+    [(tipo, query, args)] = conn.calls
+    assert tipo == "execute"
+    assert "condominio_id is not distinct from $1" in query.lower()
+    assert "documento = $2" in query.lower()
+    assert args == (CONDOMINIO_ID, "Regimento Teste")
+
+
+def test_apagar_escopo_geral_passa_none_sem_traduzir():
+    conn = _FakeConn()
+    apagadas = asyncio.run(
+        regras.apagar_regras_do_documento(
+            conn, condominio_id=None, documento="Lei Exemplo"
+        )
+    )
+    assert apagadas == 0
+    [(_, _, args)] = conn.calls
+    assert args[0] is None
+
+
+def test_apagar_stripa_o_documento_como_o_chunker():
+    conn = _FakeConn()
+    asyncio.run(
+        regras.apagar_regras_do_documento(
+            conn, condominio_id=CONDOMINIO_ID, documento="  Regimento Teste  "
+        )
+    )
+    [(_, _, args)] = conn.calls
+    assert args[1] == "Regimento Teste"
 
 
 def test_buscar_limite_invalido_falha_antes_de_tocar_o_banco():

@@ -16,8 +16,13 @@ create extension vector with schema extensions;
 -- operador <=> não resolve. Vale para as PRÓXIMAS conexões (as dos testes).
 alter role test set search_path = "$user", public, extensions;
 
--- Stubs mínimos só para as FKs resolverem (colunas reais irrelevantes aqui).
-create table public.condominios (id uuid primary key default gen_random_uuid());
+-- Stubs mínimos: FKs + o slug consultado por condominios.py (UNIQUE e CHECK
+-- como na produção; nullable AQUI, ao contrário da produção, para os inserts
+-- `default values` dos outros testes continuarem válidos).
+create table public.condominios (
+  id uuid primary key default gen_random_uuid(),
+  slug text unique check (slug ~ '^[a-z0-9-]+$')
+);
 create table public.moradores (id uuid primary key default gen_random_uuid());
 
 create or replace function public.set_updated_at()

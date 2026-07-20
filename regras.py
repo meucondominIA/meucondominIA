@@ -14,9 +14,16 @@ recomendada para os embeddings da OpenAI (normalizados, comprimento 1).
 escopo é DERIVADO de condominio_id — a chk_regras_escopo torna os dois o mesmo
 fato, então o par ilegal fica irrepresentável no chamador. O lote usa
 executemany, atômico desde asyncpg 0.22 (entra tudo ou nada) sem transação
-própria; a substituição atômica da reingestão (delete + insert) é do chamador
-(Passo 5). O embedding da pergunta nasce FORA daqui, antes da conn — nenhuma
-conexão do pool atravessa I/O de rede.
+própria; o delete da reingestão mora aqui (apagar_regras_do_documento), mas a
+transação que o junta ao insert é do chamador (Passo 5). O embedding da
+pergunta nasce FORA daqui, antes da conn — nenhuma conexão do pool atravessa
+I/O de rede.
+
+No delete, `is not distinct from` trata NULL como valor: o escopo 'geral' tem
+condominio_id NULL e `=` com NULL nunca é verdadeiro — o par (condominio_id,
+documento) vira chave de substituição para os dois escopos com um SQL só. A
+contagem devolvida vem do command tag "DELETE n" (formato do protocolo do
+Postgres, não heurística).
 """
 
 from uuid import UUID
@@ -70,6 +77,28 @@ async def inserir_regras(
             for chunk, embedding in zip(chunks, embeddings, strict=True)
         ],
     )
+
+
+async def apagar_regras_do_documento(
+    conn: asyncpg.Connection,
+    *,
+    condominio_id: UUID | None,
+    documento: str,
+) -> int:
+    """Apaga as regras do documento; devolve quantas saíram (0 = documento novo)."""
+    documento = documento.strip()
+    if not documento:
+        raise ValueError("documento em branco: não identifica o que apagar")
+    status = await conn.execute(
+        """
+        delete from regras
+        where condominio_id is not distinct from $1
+          and documento = $2
+        """,
+        condominio_id,
+        documento,
+    )
+    return int(status.removeprefix("DELETE "))
 
 
 async def buscar_por_similaridade(

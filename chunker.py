@@ -64,7 +64,7 @@ _MARCADOR_ARTIGO = re.compile(
     r"^(?:Art|ART)(?:igo|IGO)?(?:\.\s*|\s+)(\d+)[º°o]?(?:-([A-Z]+))?(?=[\s.:–—-]|$)"
 )
 
-_CABECALHO_ESTRUTURAL = re.compile(
+CABECALHO_ESTRUTURAL = re.compile(
     r"^(?:T[ÍI]TULO|CAP[ÍI]TULO|SE[ÇC][ÃA]O|SUBSE[ÇC][ÃA]O|LIVRO|PARTE)"
     r"\s+(?:[IVXLCDM]+|\d+)(?:-[A-Z]+)?\b"
 )
@@ -93,7 +93,7 @@ def dividir_regimento(texto: str, documento: str) -> list[Chunk]:
             blocos.append((_designacao_canonica(marcador), [linha]))
             aguardando_linha_titulo = False
             continue
-        if _CABECALHO_ESTRUTURAL.match(linha):
+        if CABECALHO_ESTRUTURAL.match(linha):
             aguardando_linha_titulo = True
             continue
         if aguardando_linha_titulo:
