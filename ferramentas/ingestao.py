@@ -14,8 +14,9 @@ OpenAI nem banco — nem bootstrap acontece. "substituídos: 0" numa reingestão
 é o alarme de typo no --documento.
 
 Saída: 0 sucesso · 1 falha de operação (mensagem limpa no stderr, via
-sys.exit) · 2 erro de uso (argparse). Falha inesperada sobe crua — traceback
-é informação e o processo já termina não-zero.
+sys.exit) · 2 erro de uso (argparse — slug em branco incluso, barrado no type=
+antes de qualquer bootstrap). Falha inesperada sobe crua — traceback é
+informação e o processo já termina não-zero.
 """
 
 import argparse
@@ -36,6 +37,13 @@ class ErroDeOperacao(Exception):
     """Falha esperada de operação: vira mensagem limpa no stderr e exit 1."""
 
 
+def _slug_condominio(valor: str) -> str:
+    slug = valor.strip()
+    if not slug:
+        raise argparse.ArgumentTypeError("slug em branco: não identifica condomínio")
+    return slug
+
+
 def _montar_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="ingestao",
@@ -48,7 +56,12 @@ def _montar_parser() -> argparse.ArgumentParser:
         help="nome canônico citável (vira a fonte) e chave de reingestão",
     )
     alvo = parser.add_mutually_exclusive_group(required=True)
-    alvo.add_argument("--condominio", metavar="SLUG", help="slug do condomínio dono")
+    alvo.add_argument(
+        "--condominio",
+        metavar="SLUG",
+        type=_slug_condominio,
+        help="slug do condomínio dono",
+    )
     alvo.add_argument(
         "--geral", action="store_true", help="escopo geral (sem condomínio)"
     )

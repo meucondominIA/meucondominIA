@@ -1,0 +1,489 @@
+{
+  "resumo": {
+    "casos": 21,
+    "com_gabarito": 18,
+    "hit_1": 17,
+    "hit_k": 17,
+    "completude": 16,
+    "vazamentos": 0,
+    "dist_acertos": [
+      0.3912094704807084,
+      0.5189597081836328,
+      0.24132218617269474,
+      0.3245030118756499,
+      0.42059268682290485,
+      0.47280797444175027,
+      0.36589200715869086,
+      0.27676215557809913,
+      0.3637985304993143,
+      0.4779541488075859,
+      0.5014629953151084,
+      0.5562017908285609,
+      0.358282989817442,
+      0.277152133102226,
+      0.26382501845490247,
+      0.37901541150602625,
+      0.40268801733047965,
+      0.37272613871021454,
+      0.45090115384435303,
+      0.38228852649936995,
+      0.44745944950868066,
+      0.37274342728816023,
+      0.39663642491908857,
+      0.49847052357911903
+    ],
+    "dist_top1_erros": [
+      0.557262135609145
+    ],
+    "dist_sem_gabarito": [
+      0.5028531472464087,
+      0.5872047754722698,
+      0.48417637652168766
+    ]
+  },
+  "casos": [
+    {
+      "pergunta": "Posso ter cachorro no apartamento?",
+      "esperadas": [
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 45",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 46"
+      ],
+      "obtidas": [
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 45",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 46",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 44",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 47",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 1º"
+      ],
+      "distancias": [
+        0.3912094704807084,
+        0.5189597081836328,
+        0.5769416911160973,
+        0.5816182323898114,
+        0.6311528237919543
+      ],
+      "vazamentos": []
+    },
+    {
+      "pergunta": "Qual o horário de silêncio do prédio?",
+      "esperadas": [
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 9º"
+      ],
+      "obtidas": [
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 9º",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 77",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 20",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 19",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 32"
+      ],
+      "distancias": [
+        0.24132218617269474,
+        0.40820824377011644,
+        0.41499344644220637,
+        0.4468529849748776,
+        0.44993554038072225
+      ],
+      "vazamentos": []
+    },
+    {
+      "pergunta": "Como faço para reservar o salão de festas?",
+      "esperadas": [
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 66",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 67"
+      ],
+      "obtidas": [
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 67",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 66",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 74",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 68",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 79"
+      ],
+      "distancias": [
+        0.3245030118756499,
+        0.42059268682290485,
+        0.4810788978767051,
+        0.5078428887624815,
+        0.5210945678037511
+      ],
+      "vazamentos": []
+    },
+    {
+      "pergunta": "Até que horas pode ir a festa no salão?",
+      "esperadas": [
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 77"
+      ],
+      "obtidas": [
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 77",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 66",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 67",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 74",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 9º"
+      ],
+      "distancias": [
+        0.47280797444175027,
+        0.4773814436679741,
+        0.4811107590776338,
+        0.4932955700478533,
+        0.5247819797111024
+      ],
+      "vazamentos": []
+    },
+    {
+      "pergunta": "Quantos convidados posso levar para o salão de festas?",
+      "esperadas": [
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 78"
+      ],
+      "obtidas": [
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 78",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 74",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 66",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 67",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 79"
+      ],
+      "distancias": [
+        0.36589200715869086,
+        0.4220533926398302,
+        0.4597365912573168,
+        0.4641902314506603,
+        0.4820146101835405
+      ],
+      "vazamentos": []
+    },
+    {
+      "pergunta": "Em que horários posso fazer obra no apartamento?",
+      "esperadas": [
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 19",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 20"
+      ],
+      "obtidas": [
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 19",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 9º",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 20",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 32",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 10"
+      ],
+      "distancias": [
+        0.27676215557809913,
+        0.3555154550629903,
+        0.3637985304993143,
+        0.3856603199319678,
+        0.48960091826703445
+      ],
+      "vazamentos": []
+    },
+    {
+      "pergunta": "Como agendo a mudança e por onde ela entra?",
+      "esperadas": [
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 31",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 32"
+      ],
+      "obtidas": [
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 31",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 32",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 58",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 14",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 33"
+      ],
+      "distancias": [
+        0.4779541488075859,
+        0.5014629953151084,
+        0.6065549788692033,
+        0.6208991856612129,
+        0.6248382761003832
+      ],
+      "vazamentos": []
+    },
+    {
+      "pergunta": "Pode estender roupa na sacada?",
+      "esperadas": [
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 1º"
+      ],
+      "obtidas": [
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 1º",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 28",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 81",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 79",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 80"
+      ],
+      "distancias": [
+        0.5562017908285609,
+        0.5757259004879307,
+        0.5878212433642223,
+        0.5992682393074639,
+        0.6005642009499207
+      ],
+      "vazamentos": []
+    },
+    {
+      "pergunta": "Pode andar de bicicleta ou jogar bola na garagem?",
+      "esperadas": [
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 40"
+      ],
+      "obtidas": [
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 40",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 81",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 36",
+        "Convenção do Condomínio Edifício Residencial Gabro, Art. 51",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 62"
+      ],
+      "distancias": [
+        0.358282989817442,
+        0.3923811089176119,
+        0.49265221709953233,
+        0.5304227077364114,
+        0.5358298195343398
+      ],
+      "vazamentos": []
+    },
+    {
+      "pergunta": "Qual a velocidade máxima dentro da garagem?",
+      "esperadas": [
+        "Convenção do Condomínio Edifício Residencial Gabro, Art. 51"
+      ],
+      "obtidas": [
+        "Convenção do Condomínio Edifício Residencial Gabro, Art. 51",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 36",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 40",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 41",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 30"
+      ],
+      "distancias": [
+        0.277152133102226,
+        0.39686179470187155,
+        0.44697666238232725,
+        0.47814882154200744,
+        0.4955322308593405
+      ],
+      "vazamentos": []
+    },
+    {
+      "pergunta": "O condomínio se responsabiliza por furto de carro na garagem?",
+      "esperadas": [
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 39",
+        "Convenção do Condomínio Edifício Residencial Gabro, Art. 52"
+      ],
+      "obtidas": [
+        "Convenção do Condomínio Edifício Residencial Gabro, Art. 52",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 7º",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 39",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 35",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 62"
+      ],
+      "distancias": [
+        0.26382501845490247,
+        0.3417524061539481,
+        0.37901541150602625,
+        0.4502419477453302,
+        0.4844832197261558
+      ],
+      "vazamentos": []
+    },
+    {
+      "pergunta": "Quem limpa se meu cachorro sujar o corredor?",
+      "esperadas": [
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 47"
+      ],
+      "obtidas": [
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 47",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 46",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 45",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 26",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 13"
+      ],
+      "distancias": [
+        0.40268801733047965,
+        0.566315884080624,
+        0.5701082030678772,
+        0.570684549686047,
+        0.5795704590761873
+      ],
+      "vazamentos": []
+    },
+    {
+      "pergunta": "Posso instalar antena na fachada do prédio?",
+      "esperadas": [
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 1º",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 17"
+      ],
+      "obtidas": [
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 17",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 58",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 59",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 5º",
+        "Convenção do Condomínio Edifício Residencial Gabro, Art. 2º"
+      ],
+      "distancias": [
+        0.37272613871021454,
+        0.38231017927624245,
+        0.549030342311121,
+        0.5545421282828673,
+        0.5754108874791763
+      ],
+      "vazamentos": []
+    },
+    {
+      "pergunta": "Levei uma multa do condomínio, como faço para recorrer?",
+      "esperadas": [
+        "Convenção do Condomínio Edifício Residencial Gabro, Art. 49"
+      ],
+      "obtidas": [
+        "Convenção do Condomínio Edifício Residencial Gabro, Art. 49",
+        "Convenção do Condomínio Edifício Residencial Gabro, Art. 48",
+        "Convenção do Condomínio Edifício Residencial Gabro, Art. 47",
+        "Convenção do Condomínio Edifício Residencial Gabro, Art. 46",
+        "Convenção do Condomínio Edifício Residencial Gabro, Art. 45"
+      ],
+      "distancias": [
+        0.45090115384435303,
+        0.45756820682240007,
+        0.4602602890980336,
+        0.47943964016554885,
+        0.4841864483006241
+      ],
+      "vazamentos": []
+    },
+    {
+      "pergunta": "Qual o valor da multa para quem descumpre o regimento?",
+      "esperadas": [
+        "Convenção do Condomínio Edifício Residencial Gabro, Art. 47",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 65"
+      ],
+      "obtidas": [
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 65",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 49",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 43",
+        "Convenção do Condomínio Edifício Residencial Gabro, Art. 46",
+        "Convenção do Condomínio Edifício Residencial Gabro, Art. 47"
+      ],
+      "distancias": [
+        0.38228852649936995,
+        0.39552839048292054,
+        0.40762434246169776,
+        0.43742721714440136,
+        0.44745944950868066
+      ],
+      "vazamentos": []
+    },
+    {
+      "pergunta": "Posso fechar a sacada com vidro? Existe um padrão?",
+      "esperadas": [
+        "Convenção do Condomínio Edifício Residencial Gabro, Art. 8º"
+      ],
+      "obtidas": [
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 37",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 38",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 59",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 1º",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 57"
+      ],
+      "distancias": [
+        0.557262135609145,
+        0.6362503862258175,
+        0.6450860166771499,
+        0.6515238062972377,
+        0.6525062599953132
+      ],
+      "vazamentos": []
+    },
+    {
+      "pergunta": "O que acontece se eu atrasar o pagamento do condomínio?",
+      "esperadas": [
+        "Convenção do Condomínio Edifício Residencial Gabro, Art. 45",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 16"
+      ],
+      "obtidas": [
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 16",
+        "Convenção do Condomínio Edifício Residencial Gabro, Art. 45",
+        "Convenção do Condomínio Edifício Residencial Gabro, Art. 47",
+        "Convenção do Condomínio Edifício Residencial Gabro, Art. 46",
+        "Convenção do Condomínio Edifício Residencial Gabro, Art. 48"
+      ],
+      "distancias": [
+        0.37274342728816023,
+        0.39663642491908857,
+        0.44591862647207736,
+        0.4482726217024947,
+        0.4581224412267716
+      ],
+      "vazamentos": []
+    },
+    {
+      "pergunta": "Vou viajar por um mês, preciso fazer algo no apartamento?",
+      "esperadas": [
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 63"
+      ],
+      "obtidas": [
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 63",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 70",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 69",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 31",
+        "Convenção do Condomínio Edifício Residencial Gabro, Art. 28"
+      ],
+      "distancias": [
+        0.49847052357911903,
+        0.6122105496504056,
+        0.618114506401596,
+        0.6189947588648115,
+        0.6252700095690022
+      ],
+      "vazamentos": []
+    },
+    {
+      "pergunta": "Posso pagar o condomínio em bitcoin?",
+      "esperadas": [],
+      "obtidas": [
+        "Convenção do Condomínio Edifício Residencial Gabro, Art. 37",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 16",
+        "Convenção do Condomínio Edifício Residencial Gabro, Art. 45",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 82",
+        "Convenção do Condomínio Edifício Residencial Gabro, Art. 48"
+      ],
+      "distancias": [
+        0.5028531472464087,
+        0.5173743030746707,
+        0.5253709460357293,
+        0.5254676345028642,
+        0.5418900619528814
+      ],
+      "vazamentos": []
+    },
+    {
+      "pergunta": "Tem academia no prédio?",
+      "esperadas": [],
+      "obtidas": [
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 81",
+        "Convenção do Condomínio Edifício Residencial Gabro, Art. 1º",
+        "Convenção do Condomínio Edifício Residencial Gabro, Art. 2º",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 5º",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 66"
+      ],
+      "distancias": [
+        0.5872047754722698,
+        0.5886646974806706,
+        0.5966212437332652,
+        0.5967689872968631,
+        0.5989255334960656
+      ],
+      "vazamentos": []
+    },
+    {
+      "pergunta": "Qual o telefone do síndico?",
+      "esperadas": [],
+      "obtidas": [
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 67",
+        "Convenção do Condomínio Edifício Residencial Gabro, Art. 9º",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 17",
+        "Convenção do Condomínio Edifício Residencial Gabro, Art. 21",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 15"
+      ],
+      "distancias": [
+        0.48417637652168766,
+        0.4876914642249195,
+        0.4903048230585294,
+        0.4916073128506063,
+        0.49216728351097205
+      ],
+      "vazamentos": []
+    }
+  ]
+}

@@ -147,6 +147,21 @@ def test_alvo_e_obrigatorio_e_exclusivo():
     assert dois_alvos.value.code == 2
 
 
+@pytest.mark.parametrize("slug", ["", "   "])
+def test_slug_em_branco_e_erro_de_uso_antes_de_ler_o_arquivo(slug, capsys):
+    """Barrado no argparse: nem o read_text acontece, quanto menos o bootstrap."""
+    with pytest.raises(SystemExit) as excinfo:
+        ingestao.main(["nao-existe.txt", "--documento", DOC, "--condominio", slug])
+    assert excinfo.value.code == 2
+    assert "slug em branco" in capsys.readouterr().err
+
+
+def test_slug_com_espaco_em_volta_e_normalizado(harness, capsys):
+    arquivo, _, chamadas, _ = harness
+    ingestao.main([str(arquivo), "--documento", DOC, "--condominio", "  res-gabro  "])
+    assert chamadas["slug"] == "res-gabro"
+
+
 def test_arquivo_inexistente_sai_limpo_com_codigo_1(tmp_path):
     with pytest.raises(SystemExit) as excinfo:
         ingestao.main([str(tmp_path / "nao-existe.txt"), "--documento", DOC, "--geral"])
