@@ -124,6 +124,162 @@ def test_chk_mensagens_assistente_exige_conteudo(rodar_tx):
     rodar_tx(body)
 
 
+async def _condominio(conn, slug: str):
+    return await conn.fetchval(
+        "insert into condominios (slug, nome) values ($1, $2) returning id",
+        slug,
+        slug.upper(),
+    )
+
+
+def test_conversa_nasce_em_identificacao(rodar_tx):
+    """Contrato do DEFAULT com o código da Fase 1: upsert_conversa_ativa não
+    nomeia `estado`, então sem DEFAULT o caminho de entrada quebraria."""
+
+    async def body(conn):
+        cid = await upsert_conversa_ativa(conn, "5511999990010")
+        row = await conn.fetchrow(
+            "select estado, condominio_id, condominio_pendente from conversas where id = $1",
+            cid,
+        )
+        assert row["estado"] == "identificacao"
+        assert row["condominio_id"] is None
+        assert row["condominio_pendente"] is None
+
+    rodar_tx(body)
+
+
+def test_chk_conversas_estado_recusa_valor_fora_da_lista(rodar_tx):
+    async def body(conn):
+        with pytest.raises(asyncpg.CheckViolationError):
+            async with conn.transaction():
+                await conn.execute(
+                    "insert into conversas (telefone, estado) values ($1, 'esperando_pizza')",
+                    "5511999990011",
+                )
+
+    rodar_tx(body)
+
+
+def test_estado_coerente_recusa_tenant_residual(rodar_tx):
+    """O elo mais fraco do isolamento: conversa NÃO identificada não pode
+    carregar condomínio nenhum — nem confirmado, nem pendente."""
+
+    async def body(conn):
+        cond = await _condominio(conn, "res-teste-a")
+
+        for coluna in ("condominio_id", "condominio_pendente"):
+            with pytest.raises(asyncpg.CheckViolationError):
+                async with conn.transaction():
+                    await conn.execute(
+                        f"insert into conversas (telefone, estado, {coluna}) "
+                        "values ($1, 'identificacao', $2)",
+                        "5511999990012",
+                        cond,
+                    )
+
+    rodar_tx(body)
+
+
+def test_estado_coerente_exige_condominio_em_menu_e_duvidas(rodar_tx):
+    async def body(conn):
+        cond = await _condominio(conn, "res-teste-b")
+
+        for estado in ("menu", "duvidas"):
+            with pytest.raises(asyncpg.CheckViolationError):
+                async with conn.transaction():
+                    await conn.execute(
+                        "insert into conversas (telefone, estado) values ($1, $2)",
+                        "5511999990013",
+                        estado,
+                    )
+            # com condomínio confirmado, o mesmo estado passa
+            await conn.execute(
+                "insert into conversas (telefone, estado, condominio_id, status) "
+                "values ($1, $2, $3, 'encerrada')",
+                "5511999990013",
+                estado,
+                cond,
+            )
+
+    rodar_tx(body)
+
+
+def test_estado_coerente_recusa_pendente_depois_de_confirmado(rodar_tx):
+    """Transição que muda `estado` sem limpar o candidato é bug: vira erro."""
+
+    async def body(conn):
+        cond = await _condominio(conn, "res-teste-c")
+        conversa = await upsert_conversa_ativa(conn, "5511999990014")
+
+        with pytest.raises(asyncpg.CheckViolationError):
+            async with conn.transaction():
+                await conn.execute(
+                    "update conversas set estado = 'menu', condominio_id = $2, "
+                    "condominio_pendente = $2 where id = $1",
+                    conversa,
+                    cond,
+                )
+
+    rodar_tx(body)
+
+
+def test_aguardando_confirmacao_aceita_com_e_sem_candidato(rodar_tx):
+    """Sem candidato é estado válido de propósito: o ON DELETE SET NULL da FK
+    pode produzi-lo, e o roteador volta a oferecer a lista."""
+
+    async def body(conn):
+        cond = await _condominio(conn, "res-teste-d")
+        conversa = await upsert_conversa_ativa(conn, "5511999990015")
+
+        await conn.execute(
+            "update conversas set estado = 'aguardando_confirmacao', "
+            "condominio_pendente = $2 where id = $1",
+            conversa,
+            cond,
+        )
+        await conn.execute(
+            "update conversas set condominio_pendente = null where id = $1", conversa
+        )
+
+        # o que NÃO passa é chegar aqui já com condomínio confirmado
+        with pytest.raises(asyncpg.CheckViolationError):
+            async with conn.transaction():
+                await conn.execute(
+                    "update conversas set condominio_id = $2 where id = $1",
+                    conversa,
+                    cond,
+                )
+
+    rodar_tx(body)
+
+
+def test_apagar_condominio_candidato_preserva_a_conversa(rodar_tx):
+    """on delete set null, e não cascade: sumir o candidato não pode sumir com
+    a conversa do morador."""
+
+    async def body(conn):
+        cond = await _condominio(conn, "res-teste-e")
+        conversa = await upsert_conversa_ativa(conn, "5511999990016")
+        await conn.execute(
+            "update conversas set estado = 'aguardando_confirmacao', "
+            "condominio_pendente = $2 where id = $1",
+            conversa,
+            cond,
+        )
+
+        await conn.execute("delete from condominios where id = $1", cond)
+
+        row = await conn.fetchrow(
+            "select estado, condominio_pendente from conversas where id = $1", conversa
+        )
+        assert row is not None
+        assert row["estado"] == "aguardando_confirmacao"
+        assert row["condominio_pendente"] is None
+
+    rodar_tx(body)
+
+
 def test_webhook_events_dedup_atomico(rodar_tx):
     async def body(conn):
         assert await registrar_mensagem(conn, "W-1", {"a": 1}) is True

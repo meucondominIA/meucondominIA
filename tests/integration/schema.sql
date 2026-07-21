@@ -18,10 +18,14 @@ alter role test set search_path = "$user", public, extensions;
 
 -- Stubs mínimos: FKs + o slug consultado por condominios.py (UNIQUE e CHECK
 -- como na produção; nullable AQUI, ao contrário da produção, para os inserts
--- `default values` dos outros testes continuarem válidos).
+-- `default values` dos outros testes continuarem válidos). `nome` entra pelo
+-- mesmo motivo (NOT NULL na produção, nullable aqui); `ativo` é fiel — é ele
+-- que tira o tenant sintético do menu do morador (D2).
 create table public.condominios (
   id uuid primary key default gen_random_uuid(),
-  slug text unique check (slug ~ '^[a-z0-9-]+$')
+  slug text unique check (slug ~ '^[a-z0-9-]+$'),
+  nome text,
+  ativo boolean not null default true
 );
 create table public.moradores (id uuid primary key default gen_random_uuid());
 
@@ -127,3 +131,22 @@ create index idx_regras_condominio_documento
 -- embedding obrigatório (20260716145702)
 alter table public.regras
   alter column embedding set not null;
+
+-- estado da conversa (20260721145648)
+alter table public.conversas
+  add column estado text not null default 'identificacao';
+alter table public.conversas
+  add column condominio_pendente uuid
+    references public.condominios (id) on delete set null;
+alter table public.conversas
+  add constraint chk_conversas_estado
+    check (estado in ('identificacao', 'aguardando_confirmacao', 'menu', 'duvidas'));
+alter table public.conversas
+  add constraint chk_conversas_estado_coerente check (
+       (estado = 'identificacao'
+          and condominio_id is null and condominio_pendente is null)
+    or (estado = 'aguardando_confirmacao'
+          and condominio_id is null)
+    or (estado in ('menu', 'duvidas')
+          and condominio_id is not null and condominio_pendente is null)
+  );
