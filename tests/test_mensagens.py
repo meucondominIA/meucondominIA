@@ -10,10 +10,19 @@ import asyncio
 from uuid import uuid4
 
 import mensagens
+from roteador import Estado, Transicao
 from zpro_models import IncomingMessage, MessageType
 
 CONVERSA_ID = uuid4()
 ENTRADA_ID = uuid4()
+CONDOMINIO_ID = uuid4()
+
+LINHA_CONVERSA = {
+    "id": CONVERSA_ID,
+    "estado": "identificacao",
+    "condominio_id": None,
+    "condominio_pendente": None,
+}
 
 
 def _msg(text: str | None = "Oi") -> IncomingMessage:
@@ -50,14 +59,43 @@ class _FakeConn:
         self.calls.append(("execute", query, args))
 
 
-def test_upsert_conversa_ativa_devolve_id():
-    conn = _FakeConn(fetchrow_results=[{"id": CONVERSA_ID}])
-    resultado = asyncio.run(mensagens.upsert_conversa_ativa(conn, "555592372732"))
-    assert resultado == CONVERSA_ID
+def test_upsert_conversa_ativa_devolve_a_trinca_de_estado():
+    conn = _FakeConn(fetchrow_results=[LINHA_CONVERSA])
+    conversa = asyncio.run(mensagens.upsert_conversa_ativa(conn, "555592372732"))
+    assert conversa.id == CONVERSA_ID
+    assert conversa.estado is Estado.IDENTIFICACAO
+    assert conversa.condominio_id is None
+    assert conversa.condominio_pendente is None
     _, query, args = conn.calls[0]
     assert "on conflict (telefone) where status = 'ativa'" in query.lower()
     assert "do update" in query.lower()
+    # o RETURNING traz a trinca junto: uma ida ao banco, não duas
+    assert "returning id, estado, condominio_id, condominio_pendente" in query.lower()
     assert args == ("555592372732",)
+
+
+def test_aplicar_transicao_escreve_as_tres_colunas_num_statement():
+    conn = _FakeConn()
+    asyncio.run(
+        mensagens.aplicar_transicao(
+            conn, CONVERSA_ID, Transicao.para_menu(CONDOMINIO_ID)
+        )
+    )
+    (tipo, query, args), *resto = conn.calls
+    assert tipo == "execute"
+    assert not resto  # um único UPDATE — o CHECK é sobre a trinca
+    for coluna in ("estado", "condominio_id", "condominio_pendente"):
+        assert coluna in query
+    assert args == (CONVERSA_ID, "menu", CONDOMINIO_ID, None)
+
+
+def test_aplicar_transicao_para_identificacao_zera_os_dois_tenants():
+    conn = _FakeConn()
+    asyncio.run(
+        mensagens.aplicar_transicao(conn, CONVERSA_ID, Transicao.para_identificacao())
+    )
+    _, _, args = conn.calls[0]
+    assert args == (CONVERSA_ID, "identificacao", None, None)
 
 
 def test_registrar_entrada_nova():

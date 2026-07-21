@@ -35,8 +35,8 @@ TEXTO_UNSUPPORTED = "Recebi sua mensagem, mas por enquanto só entendo texto."
 async def processar_mensagem(msg: IncomingMessage) -> None:
     async with get_pool().acquire() as conn:
         async with conn.transaction():
-            conversa_id = await upsert_conversa_ativa(conn, msg.phone)
-            entrada_id, nova = await registrar_entrada(conn, conversa_id, msg)
+            conversa = await upsert_conversa_ativa(conn, msg.phone)
+            entrada_id, nova = await registrar_entrada(conn, conversa.id, msg)
 
         if not nova and await saida_ja_existe(conn, entrada_id):
             logger.info(
@@ -55,4 +55,4 @@ async def processar_mensagem(msg: IncomingMessage) -> None:
     )
 
     async with get_pool().acquire() as conn:
-        await registrar_saida(conn, conversa_id, texto, entrada_id)
+        await registrar_saida(conn, conversa.id, texto, entrada_id)

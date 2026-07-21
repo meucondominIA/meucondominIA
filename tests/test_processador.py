@@ -22,10 +22,24 @@ import webhook
 from config import settings
 from dedup import StatusEvento
 from main import app
+from roteador import Conversa, Estado
 from zpro_models import IncomingMessage, MessageType
 
 CONVERSA_ID = uuid4()
 ENTRADA_ID = uuid4()
+
+LINHA_CONVERSA = {
+    "id": CONVERSA_ID,
+    "estado": "identificacao",
+    "condominio_id": None,
+    "condominio_pendente": None,
+}
+CONVERSA = Conversa(
+    id=CONVERSA_ID,
+    estado=Estado.IDENTIFICACAO,
+    condominio_id=None,
+    condominio_pendente=None,
+)
 
 
 def _msg(text: str | None = "Oi") -> IncomingMessage:
@@ -97,7 +111,7 @@ def deps(monkeypatch):
     conn = _FakeConn()
     mocks = SimpleNamespace(
         conn=conn,
-        upsert=AsyncMock(return_value=CONVERSA_ID),
+        upsert=AsyncMock(return_value=CONVERSA),
         entrada=AsyncMock(return_value=(ENTRADA_ID, True)),
         ja_existe=AsyncMock(return_value=False),
         saida=AsyncMock(),
@@ -186,7 +200,7 @@ def _payload(msg_id="E2E-1", text="Oi"):
 
 
 def test_ciclo_ponta_a_ponta(monkeypatch):
-    conn = _FakeConn(fetchrow_results=[{"id": CONVERSA_ID}, {"id": ENTRADA_ID}])
+    conn = _FakeConn(fetchrow_results=[LINHA_CONVERSA, {"id": ENTRADA_ID}])
     enviar = AsyncMock()
     registrar = AsyncMock(return_value=True)
     marcar = AsyncMock()

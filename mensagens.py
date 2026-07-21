@@ -10,22 +10,50 @@ from uuid import UUID
 
 import asyncpg
 
+from roteador import Conversa, Transicao
 from zpro_models import IncomingMessage
 
 
-async def upsert_conversa_ativa(conn: asyncpg.Connection, telefone: str) -> UUID:
-    """Devolve o id da conversa ativa do telefone, criando-a se não existir."""
+async def upsert_conversa_ativa(conn: asyncpg.Connection, telefone: str) -> Conversa:
+    """A conversa ativa do telefone, criando-a se não existir.
+
+    Devolve a trinca de estado junto do id no MESMO statement: o roteador
+    precisa dos três campos, e uma segunda consulta seria outra ida ao banco
+    para dados que o RETURNING já tinha em mãos.
+    """
     row = await conn.fetchrow(
         """
         insert into conversas (telefone)
         values ($1)
         on conflict (telefone) where status = 'ativa'
         do update set updated_at = now()
-        returning id
+        returning id, estado, condominio_id, condominio_pendente
         """,
         telefone,
     )
-    return row["id"]
+    return Conversa.model_validate(dict(row))
+
+
+async def aplicar_transicao(
+    conn: asyncpg.Connection, conversa_id: UUID, transicao: Transicao
+) -> None:
+    """Grava a trinca numa instrução só.
+
+    Não é estilo: chk_conversas_estado_coerente é sobre as TRÊS colunas, então
+    escrever só `estado` deixaria a linha incoerente no meio do caminho — e o
+    banco recusaria. Um UPDATE, três colunas, o CHECK valida o resultado.
+    """
+    await conn.execute(
+        """
+        update conversas
+           set estado = $2, condominio_id = $3, condominio_pendente = $4
+         where id = $1
+        """,
+        conversa_id,
+        transicao.estado.value,
+        transicao.condominio_id,
+        transicao.condominio_pendente,
+    )
 
 
 async def registrar_entrada(
