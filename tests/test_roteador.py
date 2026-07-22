@@ -8,6 +8,7 @@ só espaços) valem tanto quanto os felizes: são eles que o morador real produz
 import inspect
 import pathlib
 import re
+from datetime import datetime, timezone
 from uuid import uuid4
 
 import pytest
@@ -26,6 +27,7 @@ from zpro_models import MessageType
 
 CONDOMINIO = uuid4()
 CANDIDATO = uuid4()
+_AGORA = datetime(2026, 7, 21, 12, 0, tzinfo=timezone.utc)
 
 
 def _conversa(estado: Estado, *, condominio=None, pendente=None) -> Conversa:
@@ -34,15 +36,26 @@ def _conversa(estado: Estado, *, condominio=None, pendente=None) -> Conversa:
         estado=estado,
         condominio_id=condominio,
         condominio_pendente=pendente,
+        ultima_interacao_em=_AGORA,
     )
 
 
-def _texto(conversa: Conversa, texto: str):
-    return rotear(conversa, tipo=MessageType.TEXT, texto=texto)
+def _texto(conversa: Conversa, texto: str, *, precisa_reconfirmar: bool = False):
+    return rotear(
+        conversa,
+        tipo=MessageType.TEXT,
+        texto=texto,
+        precisa_reconfirmar=precisa_reconfirmar,
+    )
 
 
-def _audio(conversa: Conversa):
-    return rotear(conversa, tipo=MessageType.UNSUPPORTED, texto=None)
+def _audio(conversa: Conversa, *, precisa_reconfirmar: bool = False):
+    return rotear(
+        conversa,
+        tipo=MessageType.UNSUPPORTED,
+        texto=None,
+        precisa_reconfirmar=precisa_reconfirmar,
+    )
 
 
 # ── identificacao ────────────────────────────────────────────────────────────
@@ -131,15 +144,16 @@ def test_menu_opcoes_nao_implementadas(texto):
 
 
 def test_menu_trocar_condominio_zera_o_tenant():
-    decisao = _texto(MENU, "5")
+    decisao = _texto(MENU, "9")
     assert decisao == Responder(
         mensagem=Mensagem.PEDIR_CONDOMINIO, transicao=Transicao.para_identificacao()
     )
     assert decisao.transicao.condominio_id is None  # não pode sobrar o antigo
 
 
-@pytest.mark.parametrize("texto", ["6", "9", "42"])
-def test_menu_numero_fora_da_faixa(texto):
+@pytest.mark.parametrize("texto", ["5", "6", "7", "8", "42"])
+def test_menu_numero_reservado_ou_fora_da_faixa(texto):
+    """5..8 são reservados sem dono; 42 é fora de tudo. Todos: não entendido."""
     assert _texto(MENU, texto) == Responder(mensagem=Mensagem.MENU_NAO_ENTENDIDO)
 
 
@@ -154,6 +168,32 @@ def test_menu_escape_e_inofensivo():
 
 def test_menu_audio():
     assert _audio(MENU) == Responder(mensagem=Mensagem.SO_ENTENDO_TEXTO)
+
+
+# ── reconfirmação de sessão ──────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("estado", [Estado.MENU, Estado.DUVIDAS])
+def test_sessao_expirada_devolve_o_tenant_ao_limbo(estado):
+    """Sessão nova em menu/duvidas: o condomínio confirmado volta a candidato."""
+    conversa = _conversa(estado, condominio=CONDOMINIO)
+    assert _texto(conversa, "1", precisa_reconfirmar=True) == Responder(
+        mensagem=Mensagem.RECONFIRMAR_CONDOMINIO,
+        transicao=Transicao.para_confirmacao(CONDOMINIO),
+    )
+
+
+def test_reconfirmacao_nao_dispara_antes_do_menu():
+    """Em identificacao/confirmacao não há tenant a reconfirmar: segue o fluxo."""
+    assert isinstance(_texto(IDENTIFICACAO, "1", precisa_reconfirmar=True), DelegarIdentificacao)
+    assert _texto(CONFIRMACAO, "1", precisa_reconfirmar=True).mensagem is Mensagem.MENU
+
+
+def test_reconfirmacao_cede_ao_filtro_de_tipo():
+    """Áudio com sessão expirada ouve 'só texto', não roda em círculo pedindo 1/2."""
+    assert _audio(MENU, precisa_reconfirmar=True) == Responder(
+        mensagem=Mensagem.SO_ENTENDO_TEXTO
+    )
 
 
 # ── duvidas ──────────────────────────────────────────────────────────────────
@@ -251,10 +291,11 @@ def test_toda_mensagem_declarada_e_alcancavel():
     emitidas = set()
     for conversa in conversas:
         emitidas.add(_audio(conversa).mensagem)
-        for texto in ("1", "2", "5", "0", "9", "oi", "   "):
-            decisao = _texto(conversa, texto)
-            if isinstance(decisao, Responder):
-                emitidas.add(decisao.mensagem)
+        for reconfirmar in (False, True):
+            for texto in ("1", "2", "5", "0", "9", "oi", "   "):
+                decisao = _texto(conversa, texto, precisa_reconfirmar=reconfirmar)
+                if isinstance(decisao, Responder):
+                    emitidas.add(decisao.mensagem)
 
     assert emitidas == set(Mensagem)
 

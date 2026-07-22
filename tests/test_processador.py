@@ -1,15 +1,16 @@
-"""Testes do processador (Parte 2 · Peça 5).
+"""Testes do processador (Fase 1 · Parte 2; Fase 3 · Passo 3).
 
-Unitários: pool/repositório/envio mockados no namespace do processador —
-testamos a orquestração (o quê chama o quê, com quais argumentos) e as
-decisões (nova vs duplicata, texto do eco, falha propaga).
+Unitários: pool/repositório/atendimento/envio mockados no namespace do
+processador — testamos a ORQUESTRAÇÃO (o quê chama o quê, em que ordem) e não a
+decisão do atendimento, que tem testes próprios. A contingência usa renderizar
+REAL (função pura), para o texto ser o de verdade.
 
-Integração leve: POST real na rota do webhook com o processador REAL rodando
-sobre conn fake e envio mockado — prova o ciclo entrada → eco → saída →
-'processado' sem banco nem rede.
+Integração leve: POST real na rota do webhook com o processador REAL sobre conn
+fake e envio mockado — prova entrada → decisão → saída → 'processado'.
 """
 
 import asyncio
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
@@ -22,24 +23,31 @@ import webhook
 from config import settings
 from dedup import StatusEvento
 from main import app
-from roteador import Conversa, Estado
+from roteador import Conversa, Estado, Transicao
+from textos import MensagemAtendimento, renderizar
 from zpro_models import IncomingMessage, MessageType
 
 CONVERSA_ID = uuid4()
 ENTRADA_ID = uuid4()
+CONDOMINIO_ID = uuid4()
+_AGORA = datetime(2026, 7, 21, 12, 0, tzinfo=timezone.utc)
 
 LINHA_CONVERSA = {
     "id": CONVERSA_ID,
     "estado": "identificacao",
     "condominio_id": None,
     "condominio_pendente": None,
+    "ultima_interacao_em": _AGORA,
 }
 CONVERSA = Conversa(
     id=CONVERSA_ID,
     estado=Estado.IDENTIFICACAO,
     condominio_id=None,
     condominio_pendente=None,
+    ultima_interacao_em=_AGORA,
 )
+
+RESPOSTA = "Olá! Escolha o seu condomínio:\n\n1 - Edifício X"
 
 
 def _msg(text: str | None = "Oi") -> IncomingMessage:
@@ -82,6 +90,10 @@ class _FakeConn:
         self.calls.append(("fetchval", query, args))
         return False
 
+    async def fetch(self, query, *args):
+        self.calls.append(("fetch", query, args))
+        return []
+
     async def execute(self, query, *args):
         self.calls.append(("execute", query, args))
 
@@ -107,42 +119,73 @@ class _FakePool:
 
 @pytest.fixture
 def deps(monkeypatch):
-    """Mocka pool, repositório e envio no namespace do processador."""
+    """Mocka pool, repositório, atendimento e envio no namespace do processador."""
     conn = _FakeConn()
     mocks = SimpleNamespace(
         conn=conn,
         upsert=AsyncMock(return_value=CONVERSA),
         entrada=AsyncMock(return_value=(ENTRADA_ID, True)),
         ja_existe=AsyncMock(return_value=False),
+        responder=AsyncMock(return_value=(RESPOSTA, None)),
         saida=AsyncMock(),
+        transicao=AsyncMock(),
+        interacao=AsyncMock(),
         enviar=AsyncMock(),
     )
     monkeypatch.setattr(processador, "get_pool", lambda: _FakePool(conn))
     monkeypatch.setattr(processador, "upsert_conversa_ativa", mocks.upsert)
     monkeypatch.setattr(processador, "registrar_entrada", mocks.entrada)
     monkeypatch.setattr(processador, "saida_ja_existe", mocks.ja_existe)
+    monkeypatch.setattr(processador, "responder", mocks.responder)
     monkeypatch.setattr(processador, "registrar_saida", mocks.saida)
+    monkeypatch.setattr(processador, "aplicar_transicao", mocks.transicao)
+    monkeypatch.setattr(processador, "marcar_interacao", mocks.interacao)
     monkeypatch.setattr(processador, "enviar", mocks.enviar)
     return mocks
 
 
-def test_fluxo_feliz_envia_eco_e_grava_saida(deps):
+def test_fluxo_feliz_envia_a_decisao_e_grava_saida(deps):
     asyncio.run(processador.processar_mensagem(_msg("Oi")))
 
     out = deps.enviar.await_args.args[0]
     assert out.phone == "555592372732"
-    assert out.text == "Eco: Oi"
+    assert out.text == RESPOSTA
     assert out.external_key == "MSG-1"
 
     deps.upsert.assert_awaited_once_with(deps.conn, "555592372732")
-    deps.saida.assert_awaited_once_with(deps.conn, CONVERSA_ID, "Eco: Oi", ENTRADA_ID)
+    deps.saida.assert_awaited_once_with(deps.conn, CONVERSA_ID, RESPOSTA, ENTRADA_ID)
+    deps.interacao.assert_awaited_once_with(deps.conn, CONVERSA_ID)
     deps.ja_existe.assert_not_awaited()
 
 
-def test_unsupported_recebe_texto_padrao(deps):
-    asyncio.run(processador.processar_mensagem(_msg(text=None)))
+def test_sem_transicao_nao_chama_aplicar(deps):
+    """A maioria das respostas não muda de estado — não gasta um UPDATE à toa."""
+    asyncio.run(processador.processar_mensagem(_msg("Oi")))
+    deps.transicao.assert_not_awaited()
+
+
+def test_com_transicao_grava_o_novo_estado(deps):
+    trans = Transicao.para_menu(CONDOMINIO_ID)
+    deps.responder.return_value = ("Menu…", trans)
+
+    asyncio.run(processador.processar_mensagem(_msg("1")))
+
+    deps.transicao.assert_awaited_once_with(deps.conn, CONVERSA_ID, trans)
+    deps.interacao.assert_awaited_once_with(deps.conn, CONVERSA_ID)
+
+
+def test_falha_no_atendimento_vira_contingencia(deps):
+    """Falha ANTES do envio não é silêncio: o morador recebe a contingência, sem
+    transição, e a saída é gravada. A exceção NÃO propaga (foi tratada)."""
+    deps.responder.side_effect = Exception("boom no atendimento")
+
+    asyncio.run(processador.processar_mensagem(_msg("Oi")))
+
     out = deps.enviar.await_args.args[0]
-    assert out.text == processador.TEXTO_UNSUPPORTED
+    assert out.text == renderizar(MensagemAtendimento.CONTINGENCIA)
+    deps.transicao.assert_not_awaited()
+    deps.saida.assert_awaited_once()
+    deps.interacao.assert_awaited_once()
 
 
 def test_duplicata_com_saida_existente_nao_reenvia(deps):
@@ -152,6 +195,7 @@ def test_duplicata_com_saida_existente_nao_reenvia(deps):
     asyncio.run(processador.processar_mensagem(_msg("Oi")))
 
     deps.ja_existe.assert_awaited_once_with(deps.conn, ENTRADA_ID)
+    deps.responder.assert_not_awaited()
     deps.enviar.assert_not_awaited()
     deps.saida.assert_not_awaited()
 
@@ -167,12 +211,14 @@ def test_duplicata_sem_saida_reenvia(deps):
 
 
 def test_falha_no_envio_propaga_e_nao_grava_saida(deps):
+    """A falha do próprio canal NÃO é contingência: sobe para marcar 'falhou'."""
     deps.enviar.side_effect = Exception("boom no envio")
 
     with pytest.raises(Exception, match="boom no envio"):
         asyncio.run(processador.processar_mensagem(_msg("Oi")))
 
     deps.saida.assert_not_awaited()
+    deps.interacao.assert_not_awaited()
 
 
 def _payload(msg_id="E2E-1", text="Oi"):
@@ -200,6 +246,12 @@ def _payload(msg_id="E2E-1", text="Oi"):
 
 
 def test_ciclo_ponta_a_ponta(monkeypatch):
+    """Webhook → processador REAL → atendimento REAL sobre conn fake.
+
+    A conversa nasce em 'identificacao'; o atendimento lista condomínios (fetch
+    devolve []), então a resposta é 'sem condomínios'. O foco é o ciclo, não o
+    texto: entrada gravada, envio disparado, saída gravada, 'processado'.
+    """
     conn = _FakeConn(fetchrow_results=[LINHA_CONVERSA, {"id": ENTRADA_ID}])
     enviar = AsyncMock()
     registrar = AsyncMock(return_value=True)
@@ -216,8 +268,8 @@ def test_ciclo_ponta_a_ponta(monkeypatch):
     assert resp.status_code == 200
 
     out = enviar.await_args.args[0]
-    assert out.text == "Eco: Oi"
     assert out.external_key == "E2E-1"
+    assert out.text == renderizar(MensagemAtendimento.SEM_CONDOMINIOS)
 
     inserts_mensagens = [
         (metodo, query, args)
@@ -226,7 +278,11 @@ def test_ciclo_ponta_a_ponta(monkeypatch):
     ]
     assert len(inserts_mensagens) == 2
     assert inserts_mensagens[0][2][1:] == ("text", "Oi", "E2E-1")
-    assert inserts_mensagens[1][2] == (CONVERSA_ID, "Eco: Oi", ENTRADA_ID)
+    assert inserts_mensagens[1][2] == (
+        CONVERSA_ID,
+        renderizar(MensagemAtendimento.SEM_CONDOMINIOS),
+        ENTRADA_ID,
+    )
 
     marcar.assert_awaited_once()
     assert marcar.await_args.args[1] == "E2E-1"

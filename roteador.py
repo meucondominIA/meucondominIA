@@ -7,10 +7,13 @@ fazer. Decide, não executa — nada aqui toca banco, rede ou relógio.
 não consegue tocar I/O nem por acidente nem daqui a seis meses. A pureza vira
 propriedade da linguagem em vez de combinado, como o CHECK faz no banco.
 
-Tudo é número. A confirmação é 1/2 como o menu é 1..5, e o escape é 0 — que fica
+Tudo é número. A confirmação é 1/2 como o menu é 1..4, e o escape é 0 — que fica
 estruturalmente fora da faixa das listas (que começam em 1), então nunca colide
 por mais que o menu cresça. Some daqui qualquer comparação de palavra: não há
 'sim', 'não' nem sinônimo a adivinhar, e por isso não há acento a normalizar.
+
+A saída é o 9, fora da faixa dos serviços: no fim da lista ela se deslocaria a
+cada serviço novo.
 
 Uma decisão = UMA mensagem. Não é preferência: uq_mensagens_em_resposta_a é
 único, então o banco só aceita uma resposta por mensagem recebida.
@@ -27,6 +30,7 @@ para quem chama, não segunda validação.
 """
 
 import re
+from datetime import datetime
 from enum import Enum, IntEnum
 from typing import Self
 from uuid import UUID
@@ -50,6 +54,7 @@ class Mensagem(str, Enum):
 
     PEDIR_CONDOMINIO = "pedir_condominio"
     CONDOMINIO_NAO_ENTENDIDO = "condominio_nao_entendido"
+    RECONFIRMAR_CONDOMINIO = "reconfirmar_condominio"
     CONFIRMACAO_NAO_ENTENDIDA = "confirmacao_nao_entendida"
     MENU = "menu"
     MENU_NAO_ENTENDIDO = "menu_nao_entendido"
@@ -68,13 +73,17 @@ class OpcaoConfirmacao(IntEnum):
 
 
 class OpcaoMenu(IntEnum):
-    """Destinos do menu. Os rótulos são do passo 3; o roteamento é daqui."""
+    """Destinos do menu. Os rótulos são do passo 3; o roteamento é daqui.
+
+    Numeração TRAVADA (21/07/2026): só itens com tabela no schema. 5..8 ficam
+    livres para o que vier, sem empurrar ninguém.
+    """
 
     DUVIDAS = 1
-    SINDICO = 2
-    RESERVA = 3
-    OCORRENCIA = 4
-    TROCAR_CONDOMINIO = 5
+    RESERVA = 2
+    OCORRENCIA = 3
+    SINDICO = 4
+    TROCAR_CONDOMINIO = 9
 
 
 _INDISPONIVEIS = frozenset({OpcaoMenu.SINDICO, OpcaoMenu.RESERVA, OpcaoMenu.OCORRENCIA})
@@ -122,7 +131,11 @@ class Transicao(BaseModel):
 
 
 class Conversa(BaseModel):
-    """O que o roteador precisa saber da conversa — espelha as colunas."""
+    """O que o roteador precisa saber da conversa — espelha as colunas.
+
+    `ultima_interacao_em` é coluna, mas o roteador não a lê: quem compara com
+    o relógio é o atendimento.
+    """
 
     model_config = ConfigDict(frozen=True)
 
@@ -130,6 +143,7 @@ class Conversa(BaseModel):
     estado: Estado
     condominio_id: UUID | None
     condominio_pendente: UUID | None
+    ultima_interacao_em: datetime
 
 
 class Responder(BaseModel):
@@ -188,13 +202,29 @@ def _recomecar_identificacao() -> Responder:
     )
 
 
-def rotear(conversa: Conversa, *, tipo: MessageType, texto: str | None) -> Decisao:
+def _reconfirmar(conversa: Conversa) -> Responder:
+    """O tenant confirmado volta a candidato: enquanto não confirmar, nenhuma
+    busca responde pelo condomínio antigo."""
+    return Responder(
+        mensagem=Mensagem.RECONFIRMAR_CONDOMINIO,
+        transicao=Transicao.para_confirmacao(_condominio_confirmado(conversa)),
+    )
+
+
+def rotear(
+    conversa: Conversa,
+    *,
+    tipo: MessageType,
+    texto: str | None,
+    precisa_reconfirmar: bool = False,
+) -> Decisao:
     """Porta única: toda mensagem do morador entra aqui e sai como decisão.
 
-    Duas guardas antes de olhar o estado, e a ORDEM entre elas importa. Quem
-    caiu em aguardando_confirmacao sem candidato precisa sair de lá mesmo
-    mandando áudio — se o filtro de tipo viesse primeiro, a pessoa ouviria "só
-    entendo texto" para sempre, sem nunca voltar à lista.
+    A ordem das guardas importa: sem candidato sai de lá mesmo por áudio; e a
+    reconfirmação vem depois do filtro de tipo, senão pedir "1 ou 2" a quem
+    mandou áudio giraria em círculo.
+
+    `precisa_reconfirmar` chega medido de fora — o roteador não olha relógio.
     """
     if (
         conversa.estado is Estado.AGUARDANDO_CONFIRMACAO
@@ -204,6 +234,9 @@ def rotear(conversa: Conversa, *, tipo: MessageType, texto: str | None) -> Decis
 
     if tipo is not MessageType.TEXT or texto is None:
         return Responder(mensagem=Mensagem.SO_ENTENDO_TEXTO)
+
+    if precisa_reconfirmar and conversa.estado in (Estado.MENU, Estado.DUVIDAS):
+        return _reconfirmar(conversa)
 
     match conversa.estado:
         case Estado.IDENTIFICACAO:
@@ -262,8 +295,11 @@ def _menu(conversa: Conversa, texto: str) -> Decisao:
     """Morador já identificado, escolhendo o que quer fazer.
 
     O 1 abre o fluxo de dúvidas — hoje a única opção implementada, e a única que
-    chama IA. 2, 3 e 4 respondem "indisponível" sem prometer prazo. O 5 é a
+    chama IA. 2, 3 e 4 respondem "indisponível" sem prometer prazo. O 9 é a
     saída de quem não é (ou deixou de ser) desse condomínio.
+
+    5..8 são reservados e ainda sem dono: caem em MENU_NAO_ENTENDIDO, que fala
+    do sistema ("não tenho essa opção") e não do morador.
 
     "quero falar com o síndico" digitado por extenso NÃO vira erro: remostra o
     menu. Quem escreveu isso acertou a intenção e errou o formato — responder

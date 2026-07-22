@@ -45,7 +45,9 @@ create table public.conversas (
   morador_id uuid references public.moradores (id) on delete set null,
   status text not null default 'ativa' check (status in ('ativa', 'encerrada')),
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  -- sessão da conversa (20260721183000)
+  ultima_interacao_em timestamptz not null default now()
 );
 create index idx_conversas_condominio_id on public.conversas (condominio_id);
 create index idx_conversas_telefone on public.conversas (telefone);

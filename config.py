@@ -33,5 +33,7 @@ class Settings(BaseSettings):
     sweeper_grace_seconds: int = 300
     sweeper_batch_size: int = 20
 
+    sessao_ttl_horas: int = 24
+
 
 settings = Settings()

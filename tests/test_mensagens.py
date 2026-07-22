@@ -7,6 +7,7 @@ certa, caminho novo vs duplicata.
 """
 
 import asyncio
+from datetime import datetime, timezone
 from uuid import uuid4
 
 import mensagens
@@ -22,6 +23,7 @@ LINHA_CONVERSA = {
     "estado": "identificacao",
     "condominio_id": None,
     "condominio_pendente": None,
+    "ultima_interacao_em": datetime(2026, 7, 21, 12, 0, tzinfo=timezone.utc),
 }
 
 
@@ -69,9 +71,25 @@ def test_upsert_conversa_ativa_devolve_a_trinca_de_estado():
     _, query, args = conn.calls[0]
     assert "on conflict (telefone) where status = 'ativa'" in query.lower()
     assert "do update" in query.lower()
-    # o RETURNING traz a trinca junto: uma ida ao banco, não duas
-    assert "returning id, estado, condominio_id, condominio_pendente" in query.lower()
+    # o RETURNING traz a trinca + a sessão junto: uma ida ao banco, não duas
+    assert (
+        "returning id, estado, condominio_id, condominio_pendente, "
+        "ultima_interacao_em" in query.lower()
+    )
+    # ultima_interacao_em NÃO é tocada no upsert: o valor ANTIGO é o que mede a
+    # inatividade — quem o avança é marcar_interacao, depois da resposta sair.
+    assert "ultima_interacao_em = now()" not in query.lower()
     assert args == ("555592372732",)
+
+
+def test_marcar_interacao_avanca_a_sessao():
+    conn = _FakeConn()
+    asyncio.run(mensagens.marcar_interacao(conn, CONVERSA_ID))
+    (metodo, query, args), *resto = conn.calls
+    assert metodo == "execute"
+    assert not resto
+    assert "ultima_interacao_em = now()" in query.lower()
+    assert args == (CONVERSA_ID,)
 
 
 def test_aplicar_transicao_escreve_as_tres_colunas_num_statement():

@@ -17,9 +17,9 @@ from zpro_models import IncomingMessage
 async def upsert_conversa_ativa(conn: asyncpg.Connection, telefone: str) -> Conversa:
     """A conversa ativa do telefone, criando-a se não existir.
 
-    Devolve a trinca de estado junto do id no MESMO statement: o roteador
-    precisa dos três campos, e uma segunda consulta seria outra ida ao banco
-    para dados que o RETURNING já tinha em mãos.
+    `ultima_interacao_em` NÃO é tocada aqui de propósito: o RETURNING precisa
+    devolver o valor ANTIGO, que é o que mede a inatividade. Quem a avança é
+    marcar_interacao, depois da resposta sair.
     """
     row = await conn.fetchrow(
         """
@@ -27,11 +27,19 @@ async def upsert_conversa_ativa(conn: asyncpg.Connection, telefone: str) -> Conv
         values ($1)
         on conflict (telefone) where status = 'ativa'
         do update set updated_at = now()
-        returning id, estado, condominio_id, condominio_pendente
+        returning id, estado, condominio_id, condominio_pendente, ultima_interacao_em
         """,
         telefone,
     )
     return Conversa.model_validate(dict(row))
+
+
+async def marcar_interacao(conn: asyncpg.Connection, conversa_id: UUID) -> None:
+    """Fecha a sessão desta mensagem. Separada de aplicar_transicao porque nem
+    toda resposta transiciona, mas toda resposta é interação."""
+    await conn.execute(
+        "update conversas set ultima_interacao_em = now() where id = $1", conversa_id
+    )
 
 
 async def aplicar_transicao(
