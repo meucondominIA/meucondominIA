@@ -10,9 +10,11 @@ O 3s da busca é corte de cauda, não margem de segurança: a latência real é
 bimodal (p50 ~590ms, p95 ~780ms, e ~2% travam em 5-6s). Cortar em 3s e retentar
 chega antes de esperar a chamada travada — medido em 500 chamadas, 15/07/2026.
 
-Erros do SDK (openai.*) sobem crus, como o HTTPStatusError no zpro_client;
-EmbeddingRespostaError é nossa: resposta 2xx que viola o contrato (contagem,
-índices ou dimensão). Precisão float32 é do codec pgvector (db.py), não daqui.
+Anti-corrupção também no caminho de erro, como em chat.py: openai.APIError vira
+EmbeddingIndisponivelError (causa encadeada via `from e`) — o chamador nunca
+importa openai para tratar falha. EmbeddingRespostaError é nossa: resposta 2xx
+que viola o contrato (contagem, índices ou dimensão). Precisão float32 é do
+codec pgvector (db.py), não daqui.
 
 Ciclo de vida idêntico a db.py/zpro_client.py: criar no startup, fechar no
 shutdown.
@@ -21,6 +23,7 @@ shutdown.
 from typing import Literal
 
 import httpx
+import openai
 from openai import AsyncOpenAI
 
 from config import settings
@@ -64,6 +67,10 @@ class EmbeddingRespostaError(Exception):
     """Resposta 2xx que viola o contrato: contagem, índices ou dimensão errados."""
 
 
+class EmbeddingIndisponivelError(Exception):
+    """Falha de transporte/status do SDK (timeout, conexão, não-2xx), embrulhada."""
+
+
 def _opcoes(caminho: Caminho) -> tuple[float, int]:
     if caminho == "busca":
         return settings.openai_timeout_busca_seconds, settings.openai_retries_busca
@@ -83,16 +90,20 @@ async def gerar_embeddings(textos: list[str], *, caminho: Caminho) -> list[list[
         raise ValueError("texto vazio ou só espaços não pode virar embedding")
 
     timeout, retries = _opcoes(caminho)
-    resposta = await (
-        get_cliente()
-        .with_options(timeout=timeout, max_retries=retries)
-        .embeddings.create(
-            input=textos,
-            model=settings.embedding_model,
-            dimensions=settings.embedding_dimensions,
-            encoding_format="float",
+    try:
+        resposta = await (
+            get_cliente()
+            .with_options(timeout=timeout, max_retries=retries)
+            .embeddings.create(
+                input=textos,
+                model=settings.embedding_model,
+                dimensions=settings.embedding_dimensions,
+                encoding_format="float",
+            )
         )
-    )
+    except openai.APIError as e:
+        raise EmbeddingIndisponivelError("embeddings indisponíveis") from e
+
     if len(resposta.data) != len(textos):
         raise EmbeddingRespostaError(
             f"contagem: enviei {len(textos)} textos, vieram {len(resposta.data)} embeddings"

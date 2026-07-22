@@ -17,8 +17,8 @@ NÃO fica armazenada na OpenAI — 404 no retrieve; invariante LGPD), sem tool
 calling e sem previous_response_id. Modelo, esforço, verbosidade, timeout e
 retry vêm de Settings. Anti-corrupção estrita: nenhum tipo do SDK atravessa a
 fronteira — nem na entrada (MensagemChat nossa), nem na saída (str), nem no erro
-(openai.APIError vira ChatIndisponivelError). É mais rígido que embeddings.py,
-que deixa openai.* subir cru — dívida registrada; alinhar embeddings é à parte.
+(openai.APIError vira ChatIndisponivelError) — mesmo padrão do embeddings.py,
+alinhado em 22/07/2026 (EmbeddingIndisponivelError, dívida paga).
 
 A guarda de leitura checa `status == "completed"` PRIMEIRO: uma resposta cortada
 (incomplete) devolve output_text PARCIAL não-vazio — mandá-lo ao morador seria

@@ -8,15 +8,13 @@ Zero token: a costura se prova sem rede, como a missão do passo pede.
 import asyncio
 from uuid import uuid4
 
-import httpx
-import openai
 import pytest
 
 import geracao
 from busca import RegraEncontrada
 from chat import ChatIndisponivelError, ChatRespostaError, PapelChat
 from contexto import Troca
-from embeddings import EmbeddingRespostaError
+from embeddings import EmbeddingIndisponivelError, EmbeddingRespostaError
 from textos import MensagemAtendimento, renderizar
 
 _ID = uuid4()
@@ -115,11 +113,10 @@ def test_trechos_vazios_com_citacao_derruba(monkeypatch):
     assert _responder() == _NAO_ENCONTRADA
 
 
-def test_falha_do_sdk_na_busca_vira_contingencia(monkeypatch):
-    erro = openai.APIConnectionError(
-        request=httpx.Request("POST", "https://api.openai.com/v1/embeddings")
+def test_embedding_indisponivel_vira_contingencia(monkeypatch):
+    _prepara(
+        monkeypatch, erro_busca=EmbeddingIndisponivelError("embeddings indisponíveis")
     )
-    _prepara(monkeypatch, erro_busca=erro)
     assert _responder() == _CONTINGENCIA
 
 

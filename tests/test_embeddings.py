@@ -180,7 +180,7 @@ def test_teto_exato_2048_passa_pela_borda():
     assert len(chamadas) == 1
 
 
-def test_erro_do_sdk_sobe_cru():
+def test_erro_do_sdk_vira_embedding_indisponivel_com_causa():
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
             401,
@@ -194,8 +194,10 @@ def test_erro_do_sdk_sobe_cru():
             },
         )
 
-    with pytest.raises(openai.AuthenticationError):
+    with pytest.raises(embeddings.EmbeddingIndisponivelError) as excinfo:
         asyncio.run(_roda(handler, ["a"]))
+
+    assert isinstance(excinfo.value.__cause__, openai.AuthenticationError)
 
 
 def _handler_500(chamadas: list[httpx.Request]):
@@ -213,7 +215,7 @@ def _handler_500(chamadas: list[httpx.Request]):
 def test_busca_usa_os_retries_do_caminho_busca():
     chamadas: list[httpx.Request] = []
 
-    with pytest.raises(openai.InternalServerError):
+    with pytest.raises(embeddings.EmbeddingIndisponivelError):
         asyncio.run(_roda(_handler_500(chamadas), ["a"], caminho="busca"))
 
     assert len(chamadas) == 1 + settings.openai_retries_busca
@@ -222,7 +224,7 @@ def test_busca_usa_os_retries_do_caminho_busca():
 def test_ingestao_usa_os_retries_do_caminho_ingestao():
     chamadas: list[httpx.Request] = []
 
-    with pytest.raises(openai.InternalServerError):
+    with pytest.raises(embeddings.EmbeddingIndisponivelError):
         asyncio.run(_roda(_handler_500(chamadas), ["a"], caminho="ingestao"))
 
     assert len(chamadas) == 1 + settings.openai_retries_ingestao

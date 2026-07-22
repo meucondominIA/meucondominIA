@@ -12,9 +12,8 @@ janela de conexão que já tem), e a conexão do SELECT de similaridade vive
 dentro de busca.py, curta, depois do embedding. Pior caso das duas redes em
 sequência ≈ 19s (medido); nenhuma conexão do pool atravessa isso.
 
-openai.APIError é capturado CRU aqui de propósito: embeddings.py deixa o erro
-do SDK subir (contrato documentado lá) — o vazamento fica contido neste except
-até o débito de alinhar embeddings ao padrão do chat ser pago.
+As duas pernas de rede falham com exceções NOSSAS: os dois adapters embrulham
+o SDK (anti-corrupção também no erro), então este módulo não conhece openai.
 
 Validação de citação (D5): toda fonte citada tem que existir entre os trechos
 recuperados — match EXATO, o modelo ecoa verbatim (medido, 22/07/2026). Sem
@@ -27,12 +26,10 @@ substantiva sem citação: isso é métrica do eval, não guarda de runtime.
 import logging
 from uuid import UUID
 
-import openai
-
 from busca import buscar_trechos
 from chat import ChatIndisponivelError, ChatRespostaError, gerar_resposta
 from contexto import Troca, montar_mensagens
-from embeddings import EmbeddingRespostaError
+from embeddings import EmbeddingIndisponivelError, EmbeddingRespostaError
 from textos import MensagemAtendimento, renderizar
 
 logger = logging.getLogger(__name__)
@@ -50,7 +47,7 @@ async def responder_duvida(
         trechos = await buscar_trechos(pergunta, condominio_id)
         resposta = await gerar_resposta(montar_mensagens(pergunta, trechos, historico))
     except (
-        openai.APIError,
+        EmbeddingIndisponivelError,
         EmbeddingRespostaError,
         ChatIndisponivelError,
         ChatRespostaError,
