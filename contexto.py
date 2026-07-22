@@ -59,6 +59,7 @@ class Troca(BaseModel):
     resposta: str
 
 
+
 def montar_mensagens(
     pergunta: str,
     trechos: list[RegraEncontrada],

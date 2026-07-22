@@ -21,6 +21,7 @@ class MensagemAtendimento(str, Enum):
     DUVIDAS_PROVISORIA = "duvidas_provisoria"
     CONTINGENCIA = "contingencia"
     SEM_CONDOMINIOS = "sem_condominios"
+    REGRA_NAO_ENCONTRADA = "regra_nao_encontrada"
 
 
 Identidade = Mensagem | MensagemAtendimento
@@ -65,6 +66,9 @@ _CONSTANTES: dict[Identidade, str] = {
     ),
     MensagemAtendimento.SEM_CONDOMINIOS: (
         "Não encontrei condomínios disponíveis agora. Pode tentar mais tarde?"
+    ),
+    MensagemAtendimento.REGRA_NAO_ENCONTRADA: (
+        "Não encontrei essa regra no regimento. Sugiro falar com o síndico."
     ),
 }
 
