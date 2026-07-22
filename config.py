@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -25,6 +27,14 @@ class Settings(BaseSettings):
     openai_timeout_ingestao_seconds: float = 60.0
     openai_retries_ingestao: int = 2
     pgvector_schema: str = "extensions"
+
+    openai_chat_model: str = "gpt-5.4-mini"
+    openai_chat_effort: Literal[
+        "none", "minimal", "low", "medium", "high", "xhigh", "max"
+    ] = "none"
+    openai_chat_verbosity: Literal["low", "medium", "high"] = "low"
+    openai_timeout_chat_seconds: float = 6.0
+    openai_retries_chat: int = 1
 
     pool_min_size: int = 1
     pool_max_size: int = 20
