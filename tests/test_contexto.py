@@ -92,3 +92,4 @@ def test_guardrails_estao_no_system_prompt():
     assert "português do Brasil" in system      # PT-BR
     assert "Fonte:" in system                  # citação (D4)
     assert "NÃO inclua a linha 'Fonte:'" in system  # omitir no não-sei
+    assert "tratarem do assunto" in system     # assunto-sem-caso-exato (eval 23/07)

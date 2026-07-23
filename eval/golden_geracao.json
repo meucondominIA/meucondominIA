@@ -1,0 +1,299 @@
+{
+  "condominio": "res-gabro",
+  "casos": [
+    {
+      "id": "cachorro",
+      "tipo": "com_resposta",
+      "pergunta": "Posso ter cachorro no apartamento?",
+      "esperadas": [
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 45",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 46"
+      ]
+    },
+    {
+      "id": "silencio",
+      "tipo": "com_resposta",
+      "pergunta": "Qual o horário de silêncio do prédio?",
+      "esperadas": [
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 9º",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 77"
+      ]
+    },
+    {
+      "id": "reservar-salao",
+      "tipo": "com_resposta",
+      "pergunta": "Como faço para reservar o salão de festas?",
+      "esperadas": [
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 66",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 67"
+      ]
+    },
+    {
+      "id": "festa-horario",
+      "tipo": "com_resposta",
+      "pergunta": "Até que horas pode ir a festa no salão?",
+      "esperadas": [
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 77",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 9º"
+      ]
+    },
+    {
+      "id": "festa-convidados",
+      "tipo": "com_resposta",
+      "pergunta": "Quantos convidados posso levar para o salão de festas?",
+      "esperadas": [
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 78"
+      ]
+    },
+    {
+      "id": "obra-horarios",
+      "tipo": "com_resposta",
+      "pergunta": "Em que horários posso fazer obra no apartamento?",
+      "esperadas": [
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 19",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 20"
+      ]
+    },
+    {
+      "id": "mudanca",
+      "tipo": "com_resposta",
+      "pergunta": "Como agendo a mudança e por onde ela entra?",
+      "esperadas": [
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 31",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 32"
+      ]
+    },
+    {
+      "id": "roupa-sacada",
+      "tipo": "com_resposta",
+      "pergunta": "Pode estender roupa na sacada?",
+      "esperadas": [
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 1º"
+      ]
+    },
+    {
+      "id": "bicicleta-garagem",
+      "tipo": "com_resposta",
+      "pergunta": "Pode andar de bicicleta ou jogar bola na garagem?",
+      "esperadas": [
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 40",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 36"
+      ]
+    },
+    {
+      "id": "velocidade-garagem",
+      "tipo": "com_resposta",
+      "pergunta": "Qual a velocidade máxima dentro da garagem?",
+      "esperadas": [
+        "Convenção do Condomínio Edifício Residencial Gabro, Art. 51",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 36"
+      ]
+    },
+    {
+      "id": "furto-garagem",
+      "tipo": "com_resposta",
+      "pergunta": "O condomínio se responsabiliza por furto de carro na garagem?",
+      "esperadas": [
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 39",
+        "Convenção do Condomínio Edifício Residencial Gabro, Art. 52",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 7º"
+      ]
+    },
+    {
+      "id": "cachorro-sujeira",
+      "tipo": "com_resposta",
+      "pergunta": "Quem limpa se meu cachorro sujar o corredor?",
+      "esperadas": [
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 47"
+      ]
+    },
+    {
+      "id": "antena-fachada",
+      "tipo": "com_resposta",
+      "pergunta": "Posso instalar antena na fachada do prédio?",
+      "esperadas": [
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 1º",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 17",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 58"
+      ]
+    },
+    {
+      "id": "multa-recurso",
+      "tipo": "com_resposta",
+      "pergunta": "Levei uma multa do condomínio, como faço para recorrer?",
+      "esperadas": [
+        "Convenção do Condomínio Edifício Residencial Gabro, Art. 49"
+      ]
+    },
+    {
+      "id": "multa-valor",
+      "tipo": "com_resposta",
+      "pergunta": "Qual o valor da multa para quem descumpre o regimento?",
+      "esperadas": [
+        "Convenção do Condomínio Edifício Residencial Gabro, Art. 47",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 65",
+        "Convenção do Condomínio Edifício Residencial Gabro, Art. 46"
+      ]
+    },
+    {
+      "id": "sacada-vidro",
+      "tipo": "com_resposta",
+      "pergunta": "Posso fechar a sacada com vidro? Existe um padrão?",
+      "esperadas": [
+        "Convenção do Condomínio Edifício Residencial Gabro, Art. 8º"
+      ],
+      "limitacao_conhecida": true
+    },
+    {
+      "id": "atraso-pagamento",
+      "tipo": "com_resposta",
+      "pergunta": "O que acontece se eu atrasar o pagamento do condomínio?",
+      "esperadas": [
+        "Convenção do Condomínio Edifício Residencial Gabro, Art. 45",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 16"
+      ]
+    },
+    {
+      "id": "viagem",
+      "tipo": "com_resposta",
+      "pergunta": "Vou viajar por um mês, preciso fazer algo no apartamento?",
+      "esperadas": [
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 63"
+      ]
+    },
+    {
+      "id": "bitcoin",
+      "tipo": "sem_resposta",
+      "pergunta": "Posso pagar o condomínio em bitcoin?",
+      "esperadas": []
+    },
+    {
+      "id": "academia",
+      "tipo": "sem_resposta",
+      "pergunta": "Tem academia no prédio?",
+      "esperadas": []
+    },
+    {
+      "id": "telefone-sindico",
+      "tipo": "sem_resposta",
+      "pergunta": "Qual o telefone do síndico?",
+      "esperadas": []
+    },
+    {
+      "id": "mt-e-gato",
+      "tipo": "com_resposta",
+      "pergunta": "E gato, pode?",
+      "esperadas": [
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 45",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 46"
+      ],
+      "historico": [
+        {
+          "pergunta": "Posso ter cachorro no apartamento?",
+          "resposta": "O regimento trata da permanência de animais domésticos nas unidades e estabelece condições para isso.\nFonte: Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 45"
+        }
+      ]
+    },
+    {
+      "id": "mt-salao-ate-que-horas",
+      "tipo": "com_resposta",
+      "pergunta": "E até que horas pode ir a festa?",
+      "esperadas": [
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 77",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 9º"
+      ],
+      "historico": [
+        {
+          "pergunta": "Como faço para reservar o salão de festas?",
+          "resposta": "O regimento estabelece as condições de reserva e uso do salão de festas pelos moradores.\nFonte: Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 66"
+        }
+      ]
+    },
+    {
+      "id": "mt-silencio-sabado",
+      "tipo": "com_resposta",
+      "pergunta": "E aos sábados, muda alguma coisa?",
+      "esperadas": [
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 9º"
+      ],
+      "historico": [
+        {
+          "pergunta": "Qual o horário de silêncio do prédio?",
+          "resposta": "O regimento define os horários de silêncio do edifício, inclusive em dias específicos.\nFonte: Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 9º"
+        }
+      ],
+      "limitacao_conhecida": true
+    },
+    {
+      "id": "mt-apos-nao-sei",
+      "tipo": "com_resposta",
+      "pergunta": "Posso ter cachorro no apartamento?",
+      "esperadas": [
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 45",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 46"
+      ],
+      "historico": [
+        {
+          "pergunta": "Tem academia no prédio?",
+          "resposta": "Não encontrei essa regra no regimento. Sugiro falar com o síndico."
+        }
+      ]
+    },
+    {
+      "id": "mt-pronome",
+      "tipo": "com_resposta",
+      "pergunta": "E como eu recorro dela?",
+      "esperadas": [
+        "Convenção do Condomínio Edifício Residencial Gabro, Art. 49"
+      ],
+      "historico": [
+        {
+          "pergunta": "Qual o valor da multa para quem descumpre o regimento?",
+          "resposta": "O regimento e a convenção preveem advertências e multa para quem descumpre os deveres condominiais.\nFonte: Convenção do Condomínio Edifício Residencial Gabro, Art. 47; Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 65"
+        }
+      ],
+      "limitacao_conhecida": true
+    },
+    {
+      "id": "edge-typo",
+      "tipo": "com_resposta",
+      "pergunta": "poso ter caxoro no apartamento??",
+      "esperadas": [
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 45",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 46"
+      ]
+    },
+    {
+      "id": "edge-numero",
+      "tipo": "sem_resposta",
+      "pergunta": "2",
+      "esperadas": []
+    },
+    {
+      "id": "edge-caps",
+      "tipo": "com_resposta",
+      "pergunta": "QUAL O HORÁRIO DE SILÊNCIO???",
+      "esperadas": [
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 9º",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 77"
+      ]
+    },
+    {
+      "id": "edge-prolixa",
+      "tipo": "com_resposta",
+      "pergunta": "Oi, tudo bem? Então, é o seguinte: comprei um apartamento aqui no prédio e estou me mudando no fim do mês, minha sogra vem ajudar e a gente vai alugar um caminhão pequeno. Queria saber como funciona para agendar a mudança e por onde o pessoal pode subir as coisas.",
+      "esperadas": [
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 31",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 32",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 33",
+        "Regimento Interno do Condomínio Edifício Residencial Gabro, Art. 21"
+      ]
+    },
+    {
+      "id": "edge-fora-dominio",
+      "tipo": "sem_resposta",
+      "pergunta": "Qual a previsão do tempo para amanhã em Santa Maria?",
+      "esperadas": []
+    }
+  ]
+}

@@ -141,11 +141,13 @@ def test_excecao_inesperada_sobe(monkeypatch):
         _responder()
 
 
-def test_fontes_citadas_cobre_as_variantes_reais():
-    assert geracao._fontes_citadas("texto sem fonte") == []
-    assert geracao._fontes_citadas("ok\nFonte: A") == ["A"]
-    assert geracao._fontes_citadas("ok\nFonte: A; B") == ["A", "B"]
-    assert geracao._fontes_citadas("ok\nFonte: [A]; [B]") == ["A", "B"]
-    assert geracao._fontes_citadas("Fonte: A\nmeio\nFonte: B") == ["A", "B"]
-    assert geracao._fontes_citadas("Fonte:") == []
-    assert geracao._fontes_citadas("  Fonte:   A  ") == ["A"]
+def testfontes_citadas_cobre_as_variantes_reais():
+    assert geracao.fontes_citadas("texto sem fonte") == []
+    assert geracao.fontes_citadas("ok\nFonte: A") == ["A"]
+    assert geracao.fontes_citadas("ok\nFonte: A; B") == ["A", "B"]
+    assert geracao.fontes_citadas("ok\nFonte: [A]; [B]") == ["A", "B"]
+    assert geracao.fontes_citadas("Fonte: A\nmeio\nFonte: B") == ["A", "B"]
+    assert geracao.fontes_citadas("Fonte:") == []
+    assert geracao.fontes_citadas("  Fonte:   A  ") == ["A"]
+    assert geracao.fontes_citadas("O animal deve ir no colo. Fonte: A") == ["A"]
+    assert geracao.fontes_citadas("ok. Fonte: [A]; [B]") == ["A", "B"]

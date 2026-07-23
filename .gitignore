@@ -22,3 +22,7 @@ CLAUDE.md
 # Documentos reais de condomínios-piloto (dados sensíveis / LGPD — não vão pro repo)
 Res.Gabro/
 docs/
+
+# Resultados de eval: contêm trechos do regimento nas respostas (mesma política
+# acima); servem ao futuro localmente, não influenciam o funcionamento
+eval/resultado-geracao-*.json

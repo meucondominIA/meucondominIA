@@ -56,7 +56,7 @@ async def responder_duvida(
         return renderizar(MensagemAtendimento.CONTINGENCIA)
 
     conhecidas = {trecho.fonte for trecho in trechos}
-    desconhecidas = [f for f in _fontes_citadas(resposta) if f not in conhecidas]
+    desconhecidas = [f for f in fontes_citadas(resposta) if f not in conhecidas]
     if desconhecidas:
         logger.warning(
             "citação não confere: condominio_id=%s desconhecidas=%s",
@@ -67,15 +67,16 @@ async def responder_duvida(
     return resposta
 
 
-def _fontes_citadas(resposta: str) -> list[str]:
-    """As fontes das linhas 'Fonte:', divididas por ';' e sem colchetes
-    (variante real do modelo, observada antes da cláusula do não-sei)."""
+def fontes_citadas(resposta: str) -> list[str]:
+    """As fontes de 'Fonte:' em qualquer posição da linha, divididas por ';' e
+    sem colchetes (variantes reais do modelo: colchetes mantidos, citação
+    inline no fim da frase — esta escapava do D5; achado do eval, 23/07/2026)."""
     citadas = []
     for linha in resposta.splitlines():
-        linha = linha.strip()
-        if not linha.startswith(_PREFIXO_FONTE):
+        posicao = linha.find(_PREFIXO_FONTE)
+        if posicao == -1:
             continue
-        for item in linha.removeprefix(_PREFIXO_FONTE).split(";"):
+        for item in linha[posicao + len(_PREFIXO_FONTE) :].split(";"):
             item = item.strip().strip("[]").strip()
             if item:
                 citadas.append(item)
