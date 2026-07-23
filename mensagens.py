@@ -10,6 +10,7 @@ from uuid import UUID
 
 import asyncpg
 
+from contexto import Troca
 from roteador import Conversa, Transicao
 from zpro_models import IncomingMessage
 
@@ -121,3 +122,30 @@ async def registrar_saida(
         texto,
         entrada_id,
     )
+
+
+async def ultimas_trocas(
+    conn: asyncpg.Connection, conversa_id: UUID, *, limite: int
+) -> list[Troca]:
+    """As últimas `limite` trocas concluídas da conversa, em ordem cronológica.
+
+    Troca é o par via em_resposta_a — a entrada recém-gravada ainda não tem
+    resposta e fica de fora por construção. Pergunta NULL (áudio) não é troca
+    utilizável; do lado da resposta o CHECK do banco garante conteúdo.
+    """
+    if limite < 1:
+        raise ValueError(f"limite deve ser >= 1; recebi {limite}")
+    rows = await conn.fetch(
+        """
+        select entrada.conteudo as pergunta, saida.conteudo as resposta
+          from mensagens saida
+          join mensagens entrada on entrada.id = saida.em_resposta_a
+         where saida.conversa_id = $1
+           and entrada.conteudo is not null
+         order by saida.created_at desc
+         limit $2
+        """,
+        conversa_id,
+        limite,
+    )
+    return [Troca.model_validate(dict(row)) for row in reversed(rows)]

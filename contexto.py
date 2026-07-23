@@ -34,7 +34,7 @@ from pydantic import BaseModel, ConfigDict
 from busca import RegraEncontrada
 from chat import MensagemChat, PapelChat
 
-_MAX_TROCAS = 3
+MAX_TROCAS = 3
 
 _SYSTEM_PROMPT = (
     "Você é o assistente virtual de um condomínio e atende moradores pelo WhatsApp.\n\n"
@@ -68,7 +68,7 @@ def montar_mensagens(
     """A lista de mensagens para gerar_resposta: system estático, histórico
     (últimas 3 trocas) e o turno atual com os trechos e a pergunta."""
     mensagens = [MensagemChat(papel=PapelChat.SISTEMA, conteudo=_SYSTEM_PROMPT)]
-    for troca in historico[-_MAX_TROCAS:]:
+    for troca in historico[-MAX_TROCAS:]:
         mensagens.append(MensagemChat(papel=PapelChat.USUARIO, conteudo=troca.pergunta))
         mensagens.append(
             MensagemChat(papel=PapelChat.ASSISTENTE, conteudo=troca.resposta)

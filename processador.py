@@ -1,4 +1,4 @@
-"""Miolo do processamento: entrada → decisão → saída (Fase 3 · Passo 3).
+"""Miolo do processamento: entrada → decisão → saída (Fase 3 · Passos 3 e 7).
 
 Substitui o eco pelo atendimento por menu. A idempotência é a mesma da Fase 1:
 entrada com ON CONFLICT no message_id + checagem de saída existente + índice
@@ -6,10 +6,10 @@ entrada com ON CONFLICT no message_id + checagem de saída existente + índice
 a TX2 reenvia (duplica no WhatsApp, nunca no banco).
 
 Três janelas de conexão, e a decisão fica na PRIMEIRA — atendimento.responder só
-toca banco, então roda com a conn já em mãos. O envio (rede) fica entre as
-janelas, sem conexão presa. A transição é gravada na TX2, junto da saída e DEPOIS
-do envio: antes do envio, o estado mentiria sobre o que o morador viu; separada
-da saída, histórico e estado poderiam discordar.
+toca banco, então roda com a conn já em mãos. A geração (duas redes) e o envio
+ficam entre as janelas, sem conexão presa. A transição é gravada na TX2, junto
+da saída e DEPOIS do envio: antes do envio, o estado mentiria sobre o que o
+morador viu; separada da saída, histórico e estado poderiam discordar.
 
 A contingência cobre só a falha ANTES do envio (a de rede não tem como avisar
 pelo canal que caiu). Ela é best-effort: se o próprio banco caiu, nem ela sai —
@@ -18,8 +18,9 @@ e a exceção sobe do mesmo jeito para o chamador marcar 'falhou'.
 
 import logging
 
-from atendimento import responder
+from atendimento import GeracaoPendente, responder
 from db import get_pool
+from geracao import responder_duvida
 from mensagens import (
     aplicar_transicao,
     marcar_interacao,
@@ -47,7 +48,13 @@ async def processar_mensagem(msg: IncomingMessage) -> None:
             )
             return
 
-        texto, transicao = await _decidir(conn, conversa, msg, entrada_id)
+        resultado = await _decidir(conn, conversa, msg, entrada_id)
+
+    match resultado:
+        case GeracaoPendente():
+            texto, transicao = await _gerar(resultado, msg), None
+        case (texto, transicao):
+            pass
 
     await enviar(
         OutgoingMessage(phone=msg.phone, text=texto, external_key=msg.message_id)
@@ -72,3 +79,15 @@ async def _decidir(conn, conversa, msg: IncomingMessage, entrada_id):
     except Exception:
         logger.exception("atendimento falhou: message_id=%s", msg.message_id)
         return renderizar(MensagemAtendimento.CONTINGENCIA), None
+
+
+async def _gerar(pendente: GeracaoPendente, msg: IncomingMessage) -> str:
+    """A última rede da geração: responder_duvida engole falha de rede (B9);
+    o que sobra é bug nosso, e bug também vira contingência."""
+    try:
+        return await responder_duvida(
+            pendente.pergunta, pendente.condominio_id, pendente.historico
+        )
+    except Exception:
+        logger.exception("geração falhou: message_id=%s", msg.message_id)
+        return renderizar(MensagemAtendimento.CONTINGENCIA)

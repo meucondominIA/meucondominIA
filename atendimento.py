@@ -1,22 +1,28 @@
-"""Costura entre o roteador (puro) e o banco (Fase 3 · Passo 3).
+"""Costura entre o roteador (puro) e o banco (Fase 3 · Passos 3 e 7).
 
 O roteador decide sem I/O e por isso DELEGA o que precisa do banco: qual
-condomínio é o item N, e o nome do candidato a citar. Aqui isso vira consulta,
-e a decisão vira (texto, transição) para o processador enviar e gravar.
+condomínio é o item N, o nome do candidato a citar — e, na dúvida, o histórico
+da conversa. Aqui isso vira consulta, e a decisão vira (texto, transição) para
+o processador enviar e gravar — ou GeracaoPendente, a chamada de geração
+adiada que o processador dispara depois de devolver a conexão ao pool.
 
-Regra de ouro: só banco, nenhuma rede. Envio e gravação da saída são do
-processador, fora de qualquer conexão presa.
+Regra de ouro: só banco, nenhuma rede. Envio, geração e gravação da saída são
+do processador, fora de qualquer conexão presa.
 
 A invariante do isolamento mora aqui: o índice N é resolvido sobre a lista
 DEVOLVIDA por listar_elegiveis, nunca por uma segunda consulta com OFFSET.
 """
 
 from datetime import datetime, timezone
+from uuid import UUID
 
 import asyncpg
+from pydantic import BaseModel, ConfigDict
 
 from condominios import CondominioElegivel, listar_elegiveis, nome_por_id
 from config import settings
+from contexto import MAX_TROCAS, Troca
+from mensagens import ultimas_trocas
 from roteador import (
     Conversa,
     Decisao,
@@ -38,6 +44,16 @@ _EXIGEM_NOME = frozenset(
 )
 
 
+class GeracaoPendente(BaseModel):
+    """A geração adiada: o processador a dispara fora da conexão."""
+
+    model_config = ConfigDict(frozen=True)
+
+    pergunta: str
+    condominio_id: UUID
+    historico: list[Troca]
+
+
 def _sessao_expirada(conversa: Conversa) -> bool:
     idade = datetime.now(timezone.utc) - conversa.ultima_interacao_em
     return idade.total_seconds() > settings.sessao_ttl_horas * 3600
@@ -49,8 +65,9 @@ async def responder(
     *,
     tipo: MessageType,
     texto: str | None,
-) -> tuple[str, Transicao | None]:
-    """A resposta ao morador e a transição a gravar (None = estado inalterado)."""
+) -> tuple[str, Transicao | None] | GeracaoPendente:
+    """A resposta ao morador e a transição a gravar (None = estado inalterado),
+    ou o pacote de geração que o processador resolve fora da conexão."""
     decisao = rotear(
         conversa,
         tipo=tipo,
@@ -62,12 +79,16 @@ async def responder(
 
 async def _resolver(
     conn: asyncpg.Connection, conversa: Conversa, decisao: Decisao
-) -> tuple[str, Transicao | None]:
+) -> tuple[str, Transicao | None] | GeracaoPendente:
     match decisao:
         case DelegarIdentificacao(indice=indice):
             return await _identificar(conn, indice)
-        case DelegarDuvida():
-            return renderizar(MensagemAtendimento.DUVIDAS_PROVISORIA), None
+        case DelegarDuvida(pergunta=pergunta):
+            return GeracaoPendente(
+                pergunta=pergunta,
+                condominio_id=conversa.condominio_id,
+                historico=await ultimas_trocas(conn, conversa.id, limite=MAX_TROCAS),
+            )
         case Responder():
             return await _responder(conn, conversa, decisao)
 

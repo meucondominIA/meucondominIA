@@ -1,9 +1,9 @@
 """Redação das mensagens fixas (função pura; nome distinto de mensagens.py, que
 é o repositório de banco).
 
-Três identidades nascem aqui porque o roteador não pode emiti-las: a primeira
-confirmação e a provisória de dúvidas dependem de I/O, e a contingência de uma
-falha. O Passo 2 fixou que identidade que o roteador não emite é campo morto lá.
+Identidades nascem aqui porque o roteador não pode emiti-las: a primeira
+confirmação depende de I/O, e a contingência de uma falha. O Passo 2 fixou que
+identidade que o roteador não emite é campo morto lá.
 
 O menu é gerado a partir de OpcaoMenu, não escrito à mão: o número sai do enum,
 então rótulo e destino não podem divergir em silêncio.
@@ -18,7 +18,6 @@ from roteador import Mensagem, OpcaoMenu
 
 class MensagemAtendimento(str, Enum):
     CONFIRMAR_CONDOMINIO = "confirmar_condominio"
-    DUVIDAS_PROVISORIA = "duvidas_provisoria"
     CONTINGENCIA = "contingencia"
     SEM_CONDOMINIOS = "sem_condominios"
     REGRA_NAO_ENCONTRADA = "regra_nao_encontrada"
@@ -56,10 +55,6 @@ _CONSTANTES: dict[Identidade, str] = {
     Mensagem.PERGUNTA_VAZIA: "Não recebi sua pergunta. Pode escrever de novo?",
     Mensagem.SO_ENTENDO_TEXTO: (
         "Recebi sua mensagem, mas por enquanto só entendo texto."
-    ),
-    MensagemAtendimento.DUVIDAS_PROVISORIA: (
-        "Ainda não consigo responder perguntas sobre o regimento.\n\n"
-        "Digite 0 para voltar ao menu."
     ),
     MensagemAtendimento.CONTINGENCIA: (
         "Tive um problema para processar sua mensagem. Pode tentar de novo?"

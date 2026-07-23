@@ -1,10 +1,11 @@
-"""Integração ponta a ponta do atendimento — Teste A (Fase 3 · Passo 3).
+"""Integração ponta a ponta do atendimento — Teste A (Fase 3 · Passos 3 e 7).
 
 Payload REAL do Z-PRO atravessa parse → processador → atendimento → banco real,
-com o ENVIO mockado (httpx.MockTransport no zpro_client). O que se prova aqui e
-não nos unitários: que a conversa progride de estado NO BANCO ao longo de uma
-sessão inteira, e que o índice N mapeia para o condomínio certo com N>1 — o caso
-que a produção de um condomínio só não consegue exercitar.
+com o ENVIO mockado (httpx.MockTransport no zpro_client) e a GERAÇÃO mockada
+(responder_duvida fake que captura os argumentos). O que se prova aqui e não
+nos unitários: que a conversa progride de estado NO BANCO ao longo de uma
+sessão inteira, que o índice N mapeia para o condomínio certo com N>1, e que o
+tenant confirmado e o histórico lido do banco chegam à geração.
 
 Pool real (não rodar_tx): o processador commita as próprias transações, então o
 isolamento entre testes é por TRUNCATE, não por rollback.
@@ -46,11 +47,12 @@ def _payload(texto: str, *, msg_id: str, numero: str = "555592372732") -> dict:
 
 
 class _Ambiente:
-    """Pool real + captura dos envios. Reusa o schema do container."""
+    """Pool real + captura dos envios e das gerações. Reusa o schema do container."""
 
-    def __init__(self, pool, enviados):
+    def __init__(self, pool, enviados, geracoes):
         self.pool = pool
         self.enviados = enviados
+        self.geracoes = geracoes
         self._contador = 0
 
     async def entregar(self, texto: str) -> str:
@@ -78,6 +80,7 @@ class _Ambiente:
 @pytest.fixture
 def ambiente(pg_dsn, monkeypatch):
     enviados: list[str] = []
+    geracoes: list[tuple] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         import json
@@ -87,10 +90,15 @@ def ambiente(pg_dsn, monkeypatch):
             200, json={"success": True, "data": {"message": "ok", "ticketId": 1}}
         )
 
+    async def _gerar_fake(pergunta, condominio_id, historico):
+        geracoes.append((pergunta, condominio_id, historico))
+        return f"[gerada] {pergunta}"
+
     async def _corpo(passos):
         pool = await asyncpg.create_pool(dsn=pg_dsn, min_size=1, max_size=4, init=db._registrar_codecs)
         await zpro_client.criar_cliente(transport=httpx.MockTransport(handler))
         monkeypatch.setattr(processador, "get_pool", lambda: pool)
+        monkeypatch.setattr(processador, "responder_duvida", _gerar_fake)
         import webhook
 
         monkeypatch.setattr(webhook, "get_pool", lambda: pool)
@@ -100,7 +108,7 @@ def ambiente(pg_dsn, monkeypatch):
                 # os testes de rollback (rodar_tx) esperam encontrá-lo: vazio.
                 await conn.execute("truncate condominios cascade")
                 await _semear(conn)
-            await passos(_Ambiente(pool, enviados))
+            await passos(_Ambiente(pool, enviados, geracoes))
         finally:
             async with pool.acquire() as conn:
                 await conn.execute("truncate condominios cascade")
@@ -155,10 +163,17 @@ def test_conversa_completa_progride_no_banco(ambiente):
         assert "pode perguntar" in convite.lower()
         assert (await a.estado())[0] == "duvidas"
 
-        # Uma pergunta de verdade -> provisória (sem IA neste passo).
-        provisoria = await a.entregar("Posso ter cachorro?")
-        assert "regimento" in provisoria.lower()
+        # Uma pergunta de verdade -> geração (mockada), fora da conexão.
+        resposta = await a.entregar("Posso ter cachorro?")
+        assert resposta == "[gerada] Posso ter cachorro?"
         assert (await a.estado())[0] == "duvidas"  # perguntar não muda de estado
+
+        # O tenant confirmado e o histórico chegam à geração; sem filtro de
+        # fluxo (B7 pendente de revisão), a navegação entra nas 3 trocas.
+        pergunta, cond_gerado, historico = a.geracoes[-1]
+        assert pergunta == "Posso ter cachorro?"
+        assert cond_gerado == pend_confirmado
+        assert [t.pergunta for t in historico] == ["2", "1", "1"]
 
         # Escape 0 -> volta ao menu.
         await a.entregar("0")

@@ -20,6 +20,7 @@ from fastapi.testclient import TestClient
 
 import processador
 import webhook
+from atendimento import GeracaoPendente
 from config import settings
 from dedup import StatusEvento
 from main import app
@@ -48,6 +49,10 @@ CONVERSA = Conversa(
 )
 
 RESPOSTA = "Olá! Escolha o seu condomínio:\n\n1 - Edifício X"
+GERADA = "Pode, um por unidade.\n\nFonte: regimento-art-10"
+PENDENTE = GeracaoPendente(
+    pergunta="Posso ter cachorro?", condominio_id=CONDOMINIO_ID, historico=[]
+)
 
 
 def _msg(text: str | None = "Oi") -> IncomingMessage:
@@ -99,22 +104,25 @@ class _FakeConn:
 
 
 class _FakeAcquire:
-    def __init__(self, conn):
-        self._conn = conn
+    def __init__(self, pool):
+        self._pool = pool
 
     async def __aenter__(self):
-        return self._conn
+        self._pool.em_uso = True
+        return self._pool._conn
 
     async def __aexit__(self, *exc):
+        self._pool.em_uso = False
         return False
 
 
 class _FakePool:
     def __init__(self, conn):
         self._conn = conn
+        self.em_uso = False
 
     def acquire(self):
-        return _FakeAcquire(self._conn)
+        return _FakeAcquire(self)
 
 
 @pytest.fixture
@@ -127,6 +135,7 @@ def deps(monkeypatch):
         entrada=AsyncMock(return_value=(ENTRADA_ID, True)),
         ja_existe=AsyncMock(return_value=False),
         responder=AsyncMock(return_value=(RESPOSTA, None)),
+        gerar=AsyncMock(return_value=GERADA),
         saida=AsyncMock(),
         transicao=AsyncMock(),
         interacao=AsyncMock(),
@@ -137,6 +146,7 @@ def deps(monkeypatch):
     monkeypatch.setattr(processador, "registrar_entrada", mocks.entrada)
     monkeypatch.setattr(processador, "saida_ja_existe", mocks.ja_existe)
     monkeypatch.setattr(processador, "responder", mocks.responder)
+    monkeypatch.setattr(processador, "responder_duvida", mocks.gerar)
     monkeypatch.setattr(processador, "registrar_saida", mocks.saida)
     monkeypatch.setattr(processador, "aplicar_transicao", mocks.transicao)
     monkeypatch.setattr(processador, "marcar_interacao", mocks.interacao)
@@ -185,6 +195,55 @@ def test_falha_no_atendimento_vira_contingencia(deps):
     assert out.text == renderizar(MensagemAtendimento.CONTINGENCIA)
     deps.transicao.assert_not_awaited()
     deps.saida.assert_awaited_once()
+    deps.interacao.assert_awaited_once()
+
+
+# ── dúvidas: a geração entre as janelas (Passo 7) ────────────────────────────
+
+
+def test_geracao_pendente_gera_envia_e_grava(deps):
+    deps.responder.return_value = PENDENTE
+
+    asyncio.run(processador.processar_mensagem(_msg("Posso ter cachorro?")))
+
+    deps.gerar.assert_awaited_once_with(
+        PENDENTE.pergunta, PENDENTE.condominio_id, PENDENTE.historico
+    )
+    out = deps.enviar.await_args.args[0]
+    assert out.text == GERADA
+    deps.saida.assert_awaited_once_with(deps.conn, CONVERSA_ID, GERADA, ENTRADA_ID)
+    deps.transicao.assert_not_awaited()
+
+
+def test_geracao_roda_sem_conexao_presa(deps, monkeypatch):
+    """A regra de ouro: quando responder_duvida roda, o pool já recebeu a
+    conexão de volta."""
+    pool = _FakePool(deps.conn)
+    monkeypatch.setattr(processador, "get_pool", lambda: pool)
+    deps.responder.return_value = PENDENTE
+    livre = []
+
+    async def _gerar(pergunta, condominio_id, historico):
+        livre.append(not pool.em_uso)
+        return GERADA
+
+    monkeypatch.setattr(processador, "responder_duvida", _gerar)
+
+    asyncio.run(processador.processar_mensagem(_msg("Posso ter cachorro?")))
+
+    assert livre == [True]
+
+
+def test_falha_na_geracao_vira_contingencia(deps):
+    deps.responder.return_value = PENDENTE
+    deps.gerar.side_effect = RuntimeError("bug na geração")
+
+    asyncio.run(processador.processar_mensagem(_msg("Posso ter cachorro?")))
+
+    out = deps.enviar.await_args.args[0]
+    assert out.text == renderizar(MensagemAtendimento.CONTINGENCIA)
+    deps.saida.assert_awaited_once()
+    deps.transicao.assert_not_awaited()
     deps.interacao.assert_awaited_once()
 
 

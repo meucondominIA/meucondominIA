@@ -10,6 +10,8 @@ import asyncio
 from datetime import datetime, timezone
 from uuid import uuid4
 
+import pytest
+
 import mensagens
 from roteador import Estado, Transicao
 from zpro_models import IncomingMessage, MessageType
@@ -44,10 +46,15 @@ def _msg(text: str | None = "Oi") -> IncomingMessage:
 
 
 class _FakeConn:
-    def __init__(self, fetchrow_results=(), fetchval_result=None):
+    def __init__(self, fetchrow_results=(), fetchval_result=None, fetch_result=()):
         self._fetchrow_results = list(fetchrow_results)
         self._fetchval_result = fetchval_result
+        self._fetch_result = list(fetch_result)
         self.calls = []
+
+    async def fetch(self, query, *args):
+        self.calls.append(("fetch", query, args))
+        return self._fetch_result
 
     async def fetchrow(self, query, *args):
         self.calls.append(("fetchrow", query, args))
@@ -165,3 +172,28 @@ def test_registrar_saida_orquestra_parametros():
     )
     assert "'assistente'" in query
     assert args == (CONVERSA_ID, "Eco: Oi", ENTRADA_ID)
+
+
+def test_ultimas_trocas_limite_invalido_levanta_sem_ir_ao_banco():
+    conn = _FakeConn()
+    with pytest.raises(ValueError):
+        asyncio.run(mensagens.ultimas_trocas(conn, CONVERSA_ID, limite=0))
+    assert conn.calls == []
+
+
+def test_ultimas_trocas_inverte_para_ordem_cronologica():
+    """O banco devolve desc (limit pega as mais novas); o chamador recebe asc."""
+    linhas_desc = [
+        {"pergunta": "E gato?", "resposta": "Também pode."},
+        {"pergunta": "Pode cachorro?", "resposta": "Pode, um."},
+    ]
+    conn = _FakeConn(fetch_result=linhas_desc)
+    trocas = asyncio.run(mensagens.ultimas_trocas(conn, CONVERSA_ID, limite=3))
+
+    assert [(t.pergunta, t.resposta) for t in trocas] == [
+        ("Pode cachorro?", "Pode, um."),
+        ("E gato?", "Também pode."),
+    ]
+    _, query, args = conn.calls[0]
+    assert "join mensagens entrada on entrada.id = saida.em_resposta_a" in query
+    assert args == (CONVERSA_ID, 3)

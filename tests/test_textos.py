@@ -25,7 +25,6 @@ _SEM_CONTEXTO = [
     Mensagem.CONVITE_PERGUNTA,
     Mensagem.PERGUNTA_VAZIA,
     Mensagem.SO_ENTENDO_TEXTO,
-    MensagemAtendimento.DUVIDAS_PROVISORIA,
     MensagemAtendimento.CONTINGENCIA,
     MensagemAtendimento.SEM_CONDOMINIOS,
 ]

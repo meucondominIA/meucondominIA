@@ -4,7 +4,7 @@ O espelho de busca.py: costura buscar_trechos (Fase 2) + montar_mensagens
 (Passo 5) + gerar_resposta (Passo 4) e devolve texto pronto para envio — SEMPRE
 texto, nunca exceção de rede (política B9): falha das duas redes vira a
 contingência do textos.py. QUALQUER outra exceção sobe, porque bug não é rede;
-o _decidir do processador segue como última rede das duas camadas.
+o _gerar do processador segue como última rede das duas camadas.
 
 A regra de ouro vale por construção: este módulo não adquire conexão nenhuma —
 nem importa db. O histórico chega pronto do chamador (Passo 7, que o lê na

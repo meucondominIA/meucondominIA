@@ -16,6 +16,8 @@ from uuid import uuid4
 
 
 import atendimento
+from atendimento import GeracaoPendente
+from contexto import MAX_TROCAS, Troca
 from roteador import Conversa, Estado, Transicao
 from zpro_models import MessageType
 
@@ -118,16 +120,26 @@ def test_confirmacao_nao_entendida_cita_o_nome_do_pendente():
     assert conn.calls[-1] == ("fetchval", conn.calls[-1][1], (C1,))
 
 
-# ── dúvidas: provisória, sem IA ──────────────────────────────────────────────
+# ── dúvidas: a delegação vira pacote de geração ──────────────────────────────
 
 
-def test_duvida_recebe_provisoria_sem_transicionar():
+def test_duvida_vira_geracao_pendente_com_historico(monkeypatch):
+    trocas = [Troca(pergunta="Pode festa?", resposta="Até 22h.")]
+    chamadas = []
+
+    async def _trocas(conn, conversa_id, *, limite):
+        chamadas.append((conn, conversa_id, limite))
+        return trocas
+
+    monkeypatch.setattr(atendimento, "ultimas_trocas", _trocas)
     conn = _FakeConn()
     conversa = _conversa(Estado.DUVIDAS, condominio=C1)
-    texto, transicao = _responder(conn, conversa, "Posso ter cachorro?")
+    pendente = _responder(conn, conversa, "Posso ter cachorro?")
 
-    assert "regimento" in texto.lower()
-    assert transicao is None
+    assert pendente == GeracaoPendente(
+        pergunta="Posso ter cachorro?", condominio_id=C1, historico=trocas
+    )
+    assert chamadas == [(conn, CONVERSA_ID, MAX_TROCAS)]
 
 
 # ── reconfirmação por sessão expirada ────────────────────────────────────────
