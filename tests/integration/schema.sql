@@ -214,3 +214,32 @@ create table public.reservas (
     tstzrange(inicio, fim, '[)') with &&
   ) where (status = 'aprovada')
 );
+
+-- escrita de reservas (Fase 4 · Etapa 2, migration 20260727151743).
+
+-- Gate de idempotência: a excl_reservas_sem_conflito é WHERE status='aprovada',
+-- então um INSERT de pendente nunca a toca e o reprocessamento duplicaria a
+-- reserva. Espelha uq_mensagens_em_resposta_a: uma reserva por mensagem de
+-- entrada. on delete set null (não cascade): apagar a conversa não pode apagar
+-- a reserva.
+alter table public.reservas
+  add column origem_mensagem_id uuid
+    references public.mensagens (id) on delete set null;
+create unique index uq_reservas_origem_mensagem
+  on public.reservas (origem_mensagem_id)
+  where (origem_mensagem_id is not null);
+
+-- Coerência área ↔ condomínio. area_id e condominio_id eram FKs INDEPENDENTES:
+-- nada impedia a área do condomínio A com o tenant do B. Isso importa porque a
+-- excl_reservas_sem_conflito chaveia só por area_id — ela só é garantia por
+-- tenant SE a área implicar o tenant. O unique redundante existe porque a FK
+-- exige destino unique/PK (ddl-constraints).
+alter table public.areas_comuns
+  add constraint uq_areas_comuns_id_condominio unique (id, condominio_id);
+alter table public.reservas
+  drop constraint reservas_area_id_fkey;
+alter table public.reservas
+  add constraint fk_reservas_area_do_tenant
+    foreign key (area_id, condominio_id)
+    references public.areas_comuns (id, condominio_id)
+    on delete cascade;

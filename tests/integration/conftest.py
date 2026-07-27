@@ -79,6 +79,44 @@ def pg_dsn():
 
 
 @pytest.fixture
+def rodar_concorrente(pg_dsn):
+    """Executa `body(abrir)`, onde `abrir()` devolve conexões INDEPENDENTES.
+
+    Corrida não cabe no rodar_tx: uma conexão só serializa tudo e o rollback do
+    fim apagaria o desfecho. Aqui cada transação commita de verdade, então a
+    limpeza é TRUNCATE depois de fechar as conexões (os outros testes revertem,
+    logo não há dado alheio a preservar)."""
+
+    def _rodar(body):
+        async def _corpo():
+            abertas = []
+
+            async def abrir():
+                conn = await asyncpg.connect(pg_dsn)
+                await db._registrar_codecs(conn)
+                abertas.append(conn)
+                return conn
+
+            try:
+                await body(abrir)
+            finally:
+                for conn in abertas:
+                    await conn.close()
+                faxina = await asyncpg.connect(pg_dsn)
+                try:
+                    await faxina.execute(
+                        "truncate reservas, mensagens, conversas, areas_comuns, "
+                        "condominios cascade"
+                    )
+                finally:
+                    await faxina.close()
+
+        asyncio.run(_corpo())
+
+    return _rodar
+
+
+@pytest.fixture
 def rodar_tx(pg_dsn):
     """Executa `body(conn)` com os codecs do db.py, numa transação revertida no
     fim — cada teste enxerga o banco limpo (isolamento)."""
