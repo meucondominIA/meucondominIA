@@ -328,6 +328,82 @@ def test_upsert_le_a_trinca_gravada(rodar_tx):
     rodar_tx(body)
 
 
+def test_reserva_exige_tenant_confirmado(rodar_tx):
+    """Fase 4 · Etapa 1: 'reserva' entra no ramo de menu/duvidas — sem
+    condominio_id o CHECK barra. O isolamento multi-tenant vale também dentro do
+    wizard: nenhuma reserva sem prédio confirmado."""
+
+    async def body(conn):
+        cond = await _condominio(conn, "res-reserva-a")
+
+        with pytest.raises(asyncpg.CheckViolationError):
+            async with conn.transaction():
+                await conn.execute(
+                    "insert into conversas (telefone, estado, rascunho) "
+                    "values ($1, 'reserva', '{\"passo\": \"dia\"}')",
+                    "5511999990030",
+                )
+
+        # tenant confirmado + rascunho objeto -> passa
+        await conn.execute(
+            "insert into conversas (telefone, estado, condominio_id, rascunho, status) "
+            "values ($1, 'reserva', $2, '{\"passo\": \"dia\"}', 'encerrada')",
+            "5511999990030",
+            cond,
+        )
+
+    rodar_tx(body)
+
+
+def test_rascunho_existe_sse_estado_reserva(rodar_tx):
+    """A sacola do wizard: presente e objeto SÓ em reserva; nula fora dela.
+    chk_conversas_rascunho junta duas garantias — sem sacola órfã e sem reserva
+    sem sacola."""
+
+    async def body(conn):
+        cond = await _condominio(conn, "res-reserva-b")
+
+        # menu COM rascunho -> barra (sacola órfã fora do wizard)
+        with pytest.raises(asyncpg.CheckViolationError):
+            async with conn.transaction():
+                await conn.execute(
+                    "insert into conversas (telefone, estado, condominio_id, rascunho) "
+                    "values ($1, 'menu', $2, '{\"x\": 1}')",
+                    "5511999990031",
+                    cond,
+                )
+
+        # reserva SEM rascunho -> barra
+        with pytest.raises(asyncpg.CheckViolationError):
+            async with conn.transaction():
+                await conn.execute(
+                    "insert into conversas (telefone, estado, condominio_id) "
+                    "values ($1, 'reserva', $2)",
+                    "5511999990031",
+                    cond,
+                )
+
+        # reserva com rascunho NÃO-objeto (array) -> barra
+        with pytest.raises(asyncpg.CheckViolationError):
+            async with conn.transaction():
+                await conn.execute(
+                    "insert into conversas (telefone, estado, condominio_id, rascunho) "
+                    "values ($1, 'reserva', $2, '[]')",
+                    "5511999990031",
+                    cond,
+                )
+
+        # menu SEM rascunho (nulo) -> passa
+        await conn.execute(
+            "insert into conversas (telefone, estado, condominio_id, status) "
+            "values ($1, 'menu', $2, 'encerrada')",
+            "5511999990031",
+            cond,
+        )
+
+    rodar_tx(body)
+
+
 def test_webhook_events_dedup_atomico(rodar_tx):
     async def body(conn):
         assert await registrar_mensagem(conn, "W-1", {"a": 1}) is True

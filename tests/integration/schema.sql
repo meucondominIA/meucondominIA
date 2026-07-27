@@ -11,6 +11,10 @@
 create schema extensions;
 create extension vector with schema extensions;
 
+-- btree_gist: exigido pela excl_reservas_sem_conflito (igualdade de area_id num
+-- índice gist). No baseline vive em public; aqui o default basta (superusuário).
+create extension btree_gist;
+
 -- Mesmo search_path da produção (rolconfig do role postgres no Supabase,
 -- verificado no banco real em 16/07/2026): sem 'extensions' no path, o
 -- operador <=> não resolve. Vale para as PRÓXIMAS conexões (as dos testes).
@@ -134,21 +138,79 @@ create index idx_regras_condominio_documento
 alter table public.regras
   alter column embedding set not null;
 
--- estado da conversa (20260721145648)
+-- estado da conversa (20260721145648) + estado do wizard de reserva
+-- (Fase 4 · Etapa 1, 20260725211219): +reserva, +rascunho, +chk_conversas_rascunho.
+-- Forma FINAL (schema.sql é construído do zero — sem o drop/recria da migration).
 alter table public.conversas
   add column estado text not null default 'identificacao';
 alter table public.conversas
   add column condominio_pendente uuid
     references public.condominios (id) on delete set null;
 alter table public.conversas
+  add column rascunho jsonb;
+alter table public.conversas
   add constraint chk_conversas_estado
-    check (estado in ('identificacao', 'aguardando_confirmacao', 'menu', 'duvidas'));
+    check (estado in ('identificacao', 'aguardando_confirmacao', 'menu', 'duvidas', 'reserva'));
 alter table public.conversas
   add constraint chk_conversas_estado_coerente check (
        (estado = 'identificacao'
           and condominio_id is null and condominio_pendente is null)
     or (estado = 'aguardando_confirmacao'
           and condominio_id is null)
-    or (estado in ('menu', 'duvidas')
+    or (estado in ('menu', 'duvidas', 'reserva')
           and condominio_id is not null and condominio_pendente is null)
   );
+alter table public.conversas
+  add constraint chk_conversas_rascunho check (
+       (estado = 'reserva'
+          and rascunho is not null and jsonb_typeof(rascunho) = 'object')
+    or (estado <> 'reserva' and rascunho is null)
+  );
+
+-- áreas comuns e reservas (baseline 20260701000000) — para as leituras da
+-- Fase 4 · Etapa 1 (listar_areas_reservaveis, dias_livres). Cópia fiel das
+-- constraints sob teste; unidades é stub mínimo (FK de reservas). Sem os
+-- triggers de updated_at: as leituras não fazem UPDATE nessas tabelas.
+create table public.unidades (id uuid primary key default gen_random_uuid());
+
+create table public.areas_comuns (
+  id uuid primary key default gen_random_uuid(),
+  condominio_id uuid not null references public.condominios (id) on delete cascade,
+  nome text not null,
+  descricao text,
+  capacidade integer check (capacidade is null or capacidade > 0),
+  reservavel boolean not null default true,
+  requer_aprovacao boolean not null default true,
+  horario_abertura time,
+  horario_fechamento time,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint chk_areas_horario check (
+    horario_abertura is null
+    or horario_fechamento is null
+    or horario_fechamento > horario_abertura
+  )
+);
+create unique index uq_areas_comuns_cond_nome
+  on public.areas_comuns (condominio_id, nome);
+
+create table public.reservas (
+  id uuid primary key default gen_random_uuid(),
+  condominio_id uuid not null references public.condominios (id) on delete cascade,
+  area_id uuid not null references public.areas_comuns (id) on delete cascade,
+  unidade_id uuid references public.unidades (id) on delete set null,
+  morador_id uuid references public.moradores (id) on delete set null,
+  telefone text,
+  inicio timestamptz not null,
+  fim timestamptz not null,
+  status text not null default 'pendente'
+    check (status in ('pendente', 'aprovada', 'recusada', 'cancelada')),
+  observacao text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint chk_reservas_periodo check (fim > inicio),
+  constraint excl_reservas_sem_conflito exclude using gist (
+    area_id with =,
+    tstzrange(inicio, fim, '[)') with &&
+  ) where (status = 'aprovada')
+);
