@@ -65,3 +65,17 @@ async def nome_por_id(conn: asyncpg.Connection, condominio_id: UUID) -> str | No
     return await conn.fetchval(
         "select nome from condominios where id = $1", condominio_id
     )
+
+
+async def timezone_por_id(conn: asyncpg.Connection, condominio_id: UUID) -> str:
+    """O fuso civil do condomínio — o que traduz "dia 25" em instantes.
+
+    Coluna NOT NULL alcançada por FK: None aqui é constraint quebrada, não caso
+    de uso. Adivinhar gravaria a reserva no dia errado.
+    """
+    tz = await conn.fetchval(
+        "select timezone from condominios where id = $1", condominio_id
+    )
+    if tz is None:
+        raise ValueError(f"condomínio {condominio_id} sem timezone")
+    return tz

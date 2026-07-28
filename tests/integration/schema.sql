@@ -29,7 +29,9 @@ create table public.condominios (
   id uuid primary key default gen_random_uuid(),
   slug text unique check (slug ~ '^[a-z0-9-]+$'),
   nome text,
-  ativo boolean not null default true
+  ativo boolean not null default true,
+  -- fiel à baseline: é ela que traduz "dia 25" em instantes (timezone_por_id).
+  timezone text not null default 'America/Sao_Paulo'
 );
 create table public.moradores (id uuid primary key default gen_random_uuid());
 

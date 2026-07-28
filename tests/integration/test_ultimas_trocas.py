@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from mensagens import ultimas_trocas, upsert_conversa_ativa
+from mensagens import conversa_ativa, ultimas_trocas
 
 pytestmark = pytest.mark.integration
 
@@ -39,8 +39,8 @@ async def _troca(conn, cid, n, *, pergunta, resposta):
 
 def test_devolve_as_ultimas_em_ordem_cronologica_so_da_conversa(rodar_tx):
     async def body(conn):
-        cid = (await upsert_conversa_ativa(conn, "5511999990101")).id
-        outra = (await upsert_conversa_ativa(conn, "5511999990102")).id
+        cid = (await conversa_ativa(conn, "5511999990101"))[0].id
+        outra = (await conversa_ativa(conn, "5511999990102"))[0].id
         for n, tema in enumerate(["cachorro", "gato", "festa", "piscina"], start=1):
             await _troca(conn, cid, n, pergunta=f"Pode {tema}?", resposta=f"R{n}")
         await _troca(conn, outra, 9, pergunta="Pode churrasco?", resposta="R-outra")
@@ -62,7 +62,7 @@ def test_entrada_sem_resposta_fica_de_fora_por_construcao(rodar_tx):
     exclui sem OFFSET nem filtro por id."""
 
     async def body(conn):
-        cid = (await upsert_conversa_ativa(conn, "5511999990103")).id
+        cid = (await conversa_ativa(conn, "5511999990103"))[0].id
         await _troca(conn, cid, 1, pergunta="Pode cachorro?", resposta="R1")
         await conn.execute(
             "insert into mensagens (conversa_id, papel, tipo, conteudo, message_id, created_at) "
@@ -83,7 +83,7 @@ def test_pergunta_nula_nao_vira_troca(rodar_tx):
     """O par (mídia -> só entendo texto) tem pergunta NULL: não é histórico."""
 
     async def body(conn):
-        cid = (await upsert_conversa_ativa(conn, "5511999990104")).id
+        cid = (await conversa_ativa(conn, "5511999990104"))[0].id
         entrada = await conn.fetchval(
             "insert into mensagens (conversa_id, papel, tipo, message_id, created_at) "
             "values ($1, 'morador', 'unsupported', $2, $3) returning id",

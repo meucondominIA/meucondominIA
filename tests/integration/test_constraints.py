@@ -13,7 +13,7 @@ import asyncpg
 import pytest
 
 from dedup import registrar_mensagem
-from mensagens import aplicar_transicao, registrar_saida, upsert_conversa_ativa
+from mensagens import aplicar_transicao, conversa_ativa, registrar_saida
 from roteador import Estado, Transicao
 
 pytestmark = pytest.mark.integration
@@ -21,7 +21,7 @@ pytestmark = pytest.mark.integration
 
 def test_uq_mensagens_message_id_bloqueia_duplicata(rodar_tx):
     async def body(conn):
-        cid = (await upsert_conversa_ativa(conn, "5511999990001")).id
+        cid = (await conversa_ativa(conn, "5511999990001"))[0].id
         await conn.execute(
             "insert into mensagens (conversa_id, papel, tipo, conteudo, message_id) "
             "values ($1, 'morador', 'text', 'oi', 'M-DUP')",
@@ -49,7 +49,7 @@ def test_uq_mensagens_message_id_bloqueia_duplicata(rodar_tx):
 
 def test_uq_mensagens_em_resposta_a_bloqueia_segunda_saida(rodar_tx):
     async def body(conn):
-        cid = (await upsert_conversa_ativa(conn, "5511999990002")).id
+        cid = (await conversa_ativa(conn, "5511999990002"))[0].id
         entrada = await conn.fetchval(
             "insert into mensagens (conversa_id, papel, tipo, conteudo, message_id) "
             "values ($1, 'morador', 'text', 'oi', 'M2') returning id",
@@ -78,8 +78,8 @@ def test_uq_mensagens_em_resposta_a_bloqueia_segunda_saida(rodar_tx):
 
 def test_uq_conversas_telefone_ativa_uma_por_vez(rodar_tx):
     async def body(conn):
-        id1 = (await upsert_conversa_ativa(conn, "5511999990003")).id
-        id2 = (await upsert_conversa_ativa(conn, "5511999990003")).id
+        id1 = (await conversa_ativa(conn, "5511999990003"))[0].id
+        id2 = (await conversa_ativa(conn, "5511999990003"))[0].id
         assert id1 == id2  # ON CONFLICT devolveu a MESMA conversa ativa
 
         with pytest.raises(asyncpg.UniqueViolationError):
@@ -104,7 +104,7 @@ def test_uq_conversas_telefone_ativa_uma_por_vez(rodar_tx):
 
 def test_chk_mensagens_assistente_exige_conteudo(rodar_tx):
     async def body(conn):
-        cid = (await upsert_conversa_ativa(conn, "5511999990004")).id
+        cid = (await conversa_ativa(conn, "5511999990004"))[0].id
 
         # assistente SEM conteúdo -> CHECK barra
         with pytest.raises(asyncpg.CheckViolationError):
@@ -134,11 +134,14 @@ async def _condominio(conn, slug: str):
 
 
 def test_conversa_nasce_em_identificacao(rodar_tx):
-    """Contrato do DEFAULT com o código da Fase 1: upsert_conversa_ativa não
-    nomeia `estado`, então sem DEFAULT o caminho de entrada quebraria."""
+    """Primeiro contato de um telefone desconhecido: sem condomínio lembrado, o
+    CASE do _ABRIR escolhe 'identificacao' e o morador recebe a lista.
+
+    Era o contrato do DEFAULT na Fase 1 (o INSERT não nomeava `estado`); desde a
+    memória do telefone o estado é explícito, e o DEFAULT virou rede de segurança."""
 
     async def body(conn):
-        cid = (await upsert_conversa_ativa(conn, "5511999990010")).id
+        cid = (await conversa_ativa(conn, "5511999990010"))[0].id
         row = await conn.fetchrow(
             "select estado, condominio_id, condominio_pendente from conversas where id = $1",
             cid,
@@ -211,7 +214,7 @@ def test_estado_coerente_recusa_pendente_depois_de_confirmado(rodar_tx):
 
     async def body(conn):
         cond = await _condominio(conn, "res-teste-c")
-        conversa = (await upsert_conversa_ativa(conn, "5511999990014")).id
+        conversa = (await conversa_ativa(conn, "5511999990014"))[0].id
 
         with pytest.raises(asyncpg.CheckViolationError):
             async with conn.transaction():
@@ -231,7 +234,7 @@ def test_aguardando_confirmacao_aceita_com_e_sem_candidato(rodar_tx):
 
     async def body(conn):
         cond = await _condominio(conn, "res-teste-d")
-        conversa = (await upsert_conversa_ativa(conn, "5511999990015")).id
+        conversa = (await conversa_ativa(conn, "5511999990015"))[0].id
 
         await conn.execute(
             "update conversas set estado = 'aguardando_confirmacao', "
@@ -261,7 +264,7 @@ def test_apagar_condominio_candidato_preserva_a_conversa(rodar_tx):
 
     async def body(conn):
         cond = await _condominio(conn, "res-teste-e")
-        conversa = (await upsert_conversa_ativa(conn, "5511999990016")).id
+        conversa = (await conversa_ativa(conn, "5511999990016"))[0].id
         await conn.execute(
             "update conversas set estado = 'aguardando_confirmacao', "
             "condominio_pendente = $2 where id = $1",
@@ -288,7 +291,7 @@ def test_toda_transicao_do_roteador_e_aceita_pelo_check(rodar_tx):
 
     async def body(conn):
         cond = await _condominio(conn, "res-teste-f")
-        conversa = await upsert_conversa_ativa(conn, "5511999990020")
+        conversa, _ = await conversa_ativa(conn, "5511999990020")
 
         for transicao in (
             Transicao.para_confirmacao(cond),
@@ -314,12 +317,12 @@ def test_upsert_le_a_trinca_gravada(rodar_tx):
 
     async def body(conn):
         cond = await _condominio(conn, "res-teste-g")
-        conversa = await upsert_conversa_ativa(conn, "5511999990021")
+        conversa, _ = await conversa_ativa(conn, "5511999990021")
         assert conversa.estado is Estado.IDENTIFICACAO
 
         await aplicar_transicao(conn, conversa.id, Transicao.para_duvidas(cond))
 
-        relida = await upsert_conversa_ativa(conn, "5511999990021")
+        relida, _ = await conversa_ativa(conn, "5511999990021")
         assert relida.id == conversa.id
         assert relida.estado is Estado.DUVIDAS
         assert relida.condominio_id == cond

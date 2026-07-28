@@ -5,11 +5,14 @@ promete prazo; o menu vem do enum, não de string solta; a lista é numerada a
 partir de 1) e o contrato (contexto faltando levanta, porque é bug de chamada).
 """
 
+from datetime import date
 from uuid import uuid4
 
 import pytest
 
+from areas import AreaReservavel
 from condominios import CondominioElegivel
+from reserva import MensagemReserva, montar_pagina
 from roteador import Mensagem, OpcaoMenu
 from textos import MensagemAtendimento, renderizar
 
@@ -17,6 +20,17 @@ LISTA = [
     CondominioElegivel(id=uuid4(), nome="Edifício Alfa"),
     CondominioElegivel(id=uuid4(), nome="Edifício Beta"),
 ]
+AREAS = [AreaReservavel(id=uuid4(), nome="Salão de Festas")]
+PAGINA = montar_pagina([date(2026, 8, d) for d in range(1, 16)], pagina=0)
+
+_CONTEXTO = dict(
+    condominios=LISTA,
+    nome_condominio="Edifício Alfa",
+    areas=AREAS,
+    area="Salão de Festas",
+    pagina=PAGINA,
+    dia=date(2026, 8, 1),
+)
 
 _SEM_CONTEXTO = [
     Mensagem.MENU,
@@ -25,31 +39,66 @@ _SEM_CONTEXTO = [
     Mensagem.CONVITE_PERGUNTA,
     Mensagem.PERGUNTA_VAZIA,
     Mensagem.SO_ENTENDO_TEXTO,
+    Mensagem.NADA_AGENDADO,
     MensagemAtendimento.CONTINGENCIA,
     MensagemAtendimento.SEM_CONDOMINIOS,
+    MensagemReserva.SEM_AREAS,
 ]
+
+# DATA_TOMADA é PREFIXO de LISTA_DIAS, não tela: não renderiza sozinha.
+_PREFIXO = {MensagemReserva.DATA_TOMADA}
 
 
 def _todas_as_identidades():
-    return list(Mensagem) + list(MensagemAtendimento)
+    return [
+        i
+        for i in list(Mensagem) + list(MensagemAtendimento) + list(MensagemReserva)
+        if i not in _PREFIXO
+    ]
 
 
 @pytest.mark.parametrize("identidade", _todas_as_identidades())
 def test_toda_identidade_tem_redacao(identidade):
     """O inverso do teste do roteador: identidade sem texto é buraco de catálogo."""
-    texto = renderizar(
-        identidade, condominios=LISTA, nome_condominio="Edifício Alfa"
-    )
+    texto = renderizar(identidade, **_CONTEXTO)
     assert isinstance(texto, str) and texto.strip()
+
+
+def test_identidades_nao_colidem_entre_os_enums():
+    """str enums de valor igual são == e têm o mesmo hash: o braço errado do
+    match capturaria a mensagem (CONFIRMACAO_NAO_ENTENDIDA existe nos dois)."""
+    valores = [
+        i.value for i in list(Mensagem) + list(MensagemAtendimento) + list(MensagemReserva)
+    ]
+    assert len(valores) == len(set(valores))
 
 
 @pytest.mark.parametrize("identidade", _todas_as_identidades())
 def test_nenhuma_promete_prazo(identidade):
-    """Decisão de produto: 'indisponível' nunca vem com 'em breve', 'logo', data."""
-    texto = renderizar(
-        identidade, condominios=LISTA, nome_condominio="Edifício Alfa"
-    ).lower()
-    for proibido in ("em breve", "logo", "prazo", "aguarde", "próxim", "dia"):
+    """Decisão de produto: nada promete quando um recurso ausente vai chegar.
+
+    A lista é só de PROMESSA. "dia"/"próxim" saíram daqui em 27/07: o wizard de
+    reserva fala de datas o tempo todo, e proibir a palavra censurava a redação
+    em vez de proteger o invariante. Onde eles importam há teste dirigido.
+    """
+    texto = renderizar(identidade, **_CONTEXTO).lower()
+    for proibido in ("em breve", "logo", "prazo", "aguarde"):
+        assert proibido not in texto
+
+
+@pytest.mark.parametrize(
+    "identidade",
+    [
+        Mensagem.OPCAO_INDISPONIVEL,
+        Mensagem.MENU_NAO_ENTENDIDO,
+        MensagemAtendimento.SEM_CONDOMINIOS,
+        MensagemAtendimento.CONTINGENCIA,
+    ],
+)
+def test_indisponivel_nao_insinua_data(identidade):
+    """Aqui sim: quem fala de recurso ausente não pode sugerir quando ele chega."""
+    texto = renderizar(identidade, **_CONTEXTO).lower()
+    for proibido in ("próxim", "dia", "semana", "mês"):
         assert proibido not in texto
 
 

@@ -23,11 +23,11 @@ from db import get_pool
 from geracao import responder_duvida
 from mensagens import (
     aplicar_transicao,
+    conversa_ativa,
     marcar_interacao,
     registrar_entrada,
     registrar_saida,
     saida_ja_existe,
-    upsert_conversa_ativa,
 )
 from textos import MensagemAtendimento, renderizar
 from zpro_client import OutgoingMessage, enviar
@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 async def processar_mensagem(msg: IncomingMessage) -> None:
     async with get_pool().acquire() as conn:
         async with conn.transaction():
-            conversa = await upsert_conversa_ativa(conn, msg.phone)
+            conversa, conversa_nova = await conversa_ativa(conn, msg.phone)
             entrada_id, nova = await registrar_entrada(conn, conversa.id, msg)
 
         if not nova and await saida_ja_existe(conn, entrada_id):
@@ -48,7 +48,7 @@ async def processar_mensagem(msg: IncomingMessage) -> None:
             )
             return
 
-        resultado = await _decidir(conn, conversa, msg, entrada_id)
+        resultado = await _decidir(conn, conversa, msg, entrada_id, conversa_nova)
 
     match resultado:
         case GeracaoPendente():
@@ -68,13 +68,14 @@ async def processar_mensagem(msg: IncomingMessage) -> None:
             await marcar_interacao(conn, conversa.id)
 
 
-async def _decidir(conn, conversa, msg: IncomingMessage, entrada_id):
+async def _decidir(conn, conversa, msg: IncomingMessage, entrada_id, conversa_nova):
     """A decisão do atendimento, com a contingência como rede: uma falha aqui
     (só banco) vira mensagem ao morador em vez de silêncio. A saída de erro NÃO
     transiciona — o estado fica onde estava."""
     try:
         return await responder(
-            conn, conversa, tipo=msg.message_type, texto=msg.text
+            conn, conversa, tipo=msg.message_type, texto=msg.text,
+            entrada_id=entrada_id, conversa_nova=conversa_nova,
         )
     except Exception:
         logger.exception("atendimento falhou: message_id=%s", msg.message_id)

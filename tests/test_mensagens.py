@@ -26,6 +26,8 @@ LINHA_CONVERSA = {
     "condominio_id": None,
     "condominio_pendente": None,
     "ultima_interacao_em": datetime(2026, 7, 21, 12, 0, tzinfo=timezone.utc),
+    "telefone": "555592372732",
+    "rascunho": None,
 }
 
 
@@ -68,25 +70,48 @@ class _FakeConn:
         self.calls.append(("execute", query, args))
 
 
-def test_upsert_conversa_ativa_devolve_a_trinca_de_estado():
+def test_conversa_ativa_existente_nao_e_nova():
+    """Achou a ativa no SELECT: nem tenta inserir, e nova=False."""
     conn = _FakeConn(fetchrow_results=[LINHA_CONVERSA])
-    conversa = asyncio.run(mensagens.upsert_conversa_ativa(conn, "555592372732"))
+    conversa, nova = asyncio.run(mensagens.conversa_ativa(conn, "555592372732"))
+
     assert conversa.id == CONVERSA_ID
     assert conversa.estado is Estado.IDENTIFICACAO
-    assert conversa.condominio_id is None
-    assert conversa.condominio_pendente is None
+    assert nova is False
+    assert len(conn.calls) == 1
     _, query, args = conn.calls[0]
-    assert "on conflict (telefone) where status = 'ativa'" in query.lower()
-    assert "do update" in query.lower()
-    # o RETURNING traz a trinca + a sessão junto: uma ida ao banco, não duas
-    assert (
-        "returning id, estado, condominio_id, condominio_pendente, "
-        "ultima_interacao_em" in query.lower()
-    )
-    # ultima_interacao_em NÃO é tocada no upsert: o valor ANTIGO é o que mede a
-    # inatividade — quem o avança é marcar_interacao, depois da resposta sair.
-    assert "ultima_interacao_em = now()" not in query.lower()
+    assert "insert" not in query.lower()
     assert args == ("555592372732",)
+
+
+def test_conversa_ativa_inexistente_abre_e_marca_nova():
+    """Sem ativa, o INSERT abre outra e o `nova` habilita a pergunta certa."""
+    conn = _FakeConn(fetchrow_results=[None, LINHA_CONVERSA])
+    conversa, nova = asyncio.run(mensagens.conversa_ativa(conn, "555592372732"))
+
+    assert conversa.id == CONVERSA_ID and nova is True
+    _, query, _ = conn.calls[1]
+    assert "insert into conversas" in query.lower()
+    assert "do nothing" in query.lower()
+    # a memória do telefone: o candidato sai do último condomínio CONFIRMADO
+    assert "condominio_id is not null" in query.lower()
+    # o RETURNING traz tudo junto: uma ida ao banco, não duas
+    for coluna in ("estado", "condominio_pendente", "ultima_interacao_em", "rascunho"):
+        assert coluna in query.lower().split("returning")[1]
+    # ultima_interacao_em NÃO é tocada: o valor ANTIGO é o que mede a inatividade
+    # — quem o avança é marcar_interacao, depois da resposta sair.
+    assert "ultima_interacao_em = now()" not in query.lower()
+
+
+def test_conversa_ativa_perde_a_corrida_e_relê():
+    """Outra mensagem do mesmo telefone abriu entre o SELECT e o INSERT: o índice
+    parcial decide o vencedor, o INSERT vira DO NOTHING e a gente relê."""
+    conn = _FakeConn(fetchrow_results=[None, None, LINHA_CONVERSA])
+    conversa, nova = asyncio.run(mensagens.conversa_ativa(conn, "555592372732"))
+
+    assert conversa.id == CONVERSA_ID
+    assert nova is False, "perder a corrida não é conversa nova"
+    assert len(conn.calls) == 3
 
 
 def test_marcar_interacao_avanca_a_sessao():
@@ -99,7 +124,7 @@ def test_marcar_interacao_avanca_a_sessao():
     assert args == (CONVERSA_ID,)
 
 
-def test_aplicar_transicao_escreve_as_tres_colunas_num_statement():
+def test_aplicar_transicao_escreve_as_quatro_colunas_num_statement():
     conn = _FakeConn()
     asyncio.run(
         mensagens.aplicar_transicao(
@@ -108,10 +133,10 @@ def test_aplicar_transicao_escreve_as_tres_colunas_num_statement():
     )
     (tipo, query, args), *resto = conn.calls
     assert tipo == "execute"
-    assert not resto  # um único UPDATE — o CHECK é sobre a trinca
-    for coluna in ("estado", "condominio_id", "condominio_pendente"):
+    assert not resto  # um único UPDATE — os CHECKs são sobre o conjunto
+    for coluna in ("estado", "condominio_id", "condominio_pendente", "rascunho"):
         assert coluna in query
-    assert args == (CONVERSA_ID, "menu", CONDOMINIO_ID, None)
+    assert args == (CONVERSA_ID, "menu", CONDOMINIO_ID, None, None)
 
 
 def test_aplicar_transicao_para_identificacao_zera_os_dois_tenants():
@@ -120,7 +145,20 @@ def test_aplicar_transicao_para_identificacao_zera_os_dois_tenants():
         mensagens.aplicar_transicao(conn, CONVERSA_ID, Transicao.para_identificacao())
     )
     _, _, args = conn.calls[0]
-    assert args == (CONVERSA_ID, "identificacao", None, None)
+    assert args == (CONVERSA_ID, "identificacao", None, None, None)
+
+
+def test_aplicar_transicao_grava_o_rascunho_junto_do_estado():
+    """chk_conversas_rascunho recusa reserva sem sacola: as duas viajam juntas."""
+    conn = _FakeConn()
+    rascunho = {"passo": "area"}
+    asyncio.run(
+        mensagens.aplicar_transicao(
+            conn, CONVERSA_ID, Transicao.para_reserva(CONDOMINIO_ID, rascunho)
+        )
+    )
+    _, _, args = conn.calls[0]
+    assert args == (CONVERSA_ID, "reserva", CONDOMINIO_ID, None, rascunho)
 
 
 def test_registrar_entrada_nova():

@@ -15,24 +15,62 @@ from roteador import Conversa, Transicao
 from zpro_models import IncomingMessage
 
 
-async def upsert_conversa_ativa(conn: asyncpg.Connection, telefone: str) -> Conversa:
-    """A conversa ativa do telefone, criando-a se não existir.
+_COLUNAS = """id, estado, condominio_id, condominio_pendente,
+              ultima_interacao_em, telefone, rascunho"""
 
-    `ultima_interacao_em` NÃO é tocada aqui de propósito: o RETURNING precisa
-    devolver o valor ANTIGO, que é o que mede a inatividade. Quem a avança é
-    marcar_interacao, depois da resposta sair.
-    """
-    row = await conn.fetchrow(
-        """
-        insert into conversas (telefone)
-        values ($1)
-        on conflict (telefone) where status = 'ativa'
-        do update set updated_at = now()
-        returning id, estado, condominio_id, condominio_pendente, ultima_interacao_em
-        """,
-        telefone,
+_ATIVA = f"""
+    select {_COLUNAS}
+      from conversas
+     where telefone = $1 and status = 'ativa'
+"""
+
+# Conversa nova já nasce apontando para o último condomínio CONFIRMADO deste
+# telefone: quem volta depois do encerramento ouve "É o Gabro?" em vez de refazer
+# a lista. Sem memória (primeiro contato) nasce em 'identificacao', como antes.
+_ABRIR = f"""
+    with lembrado as (
+        select condominio_id from conversas
+         where telefone = $1 and condominio_id is not null
+         order by ultima_interacao_em desc
+         limit 1
     )
-    return Conversa.model_validate(dict(row))
+    insert into conversas (telefone, estado, condominio_pendente)
+    select $1,
+           case when (select condominio_id from lembrado) is null
+                then 'identificacao' else 'aguardando_confirmacao' end,
+           (select condominio_id from lembrado)
+    on conflict (telefone) where status = 'ativa' do nothing
+    returning {_COLUNAS}
+"""
+
+
+async def conversa_ativa(
+    conn: asyncpg.Connection, telefone: str
+) -> tuple[Conversa, bool]:
+    """A conversa ativa do telefone, abrindo outra se a anterior foi encerrada.
+
+    Devolve (conversa, nova). O `nova` não é conveniência: é o que permite ao
+    atendimento PERGUNTAR "é o Gabro?" em vez de corrigir "só preciso de 1 ou 2"
+    — o roteador não tem como saber que aquela conversa nunca fez a pergunta.
+
+    SELECT antes de INSERT em vez de upsert: `on conflict do update` não diz se
+    inseriu, e o truque do xmax não está na doc. Dois statements explícitos.
+
+    `ultima_interacao_em` NÃO é tocada aqui de propósito: o valor ANTIGO é o que
+    mede a inatividade. Quem a avança é marcar_interacao, depois da resposta sair.
+    """
+    row = await conn.fetchrow(_ATIVA, telefone)
+    if row is not None:
+        return Conversa.model_validate(dict(row)), False
+
+    row = await conn.fetchrow(_ABRIR, telefone)
+    if row is not None:
+        return Conversa.model_validate(dict(row)), True
+
+    # Corrida: outra mensagem do mesmo telefone abriu a conversa entre o SELECT e
+    # o INSERT. O índice parcial decidiu o vencedor; aqui só lemos o resultado.
+    row = await conn.fetchrow(_ATIVA, telefone)
+    return Conversa.model_validate(dict(row)), False
 
 
 async def marcar_interacao(conn: asyncpg.Connection, conversa_id: UUID) -> None:
@@ -46,22 +84,25 @@ async def marcar_interacao(conn: asyncpg.Connection, conversa_id: UUID) -> None:
 async def aplicar_transicao(
     conn: asyncpg.Connection, conversa_id: UUID, transicao: Transicao
 ) -> None:
-    """Grava a trinca numa instrução só.
+    """Grava o destino numa instrução só.
 
-    Não é estilo: chk_conversas_estado_coerente é sobre as TRÊS colunas, então
-    escrever só `estado` deixaria a linha incoerente no meio do caminho — e o
-    banco recusaria. Um UPDATE, três colunas, o CHECK valida o resultado.
+    Não é estilo: chk_conversas_estado_coerente é sobre as três primeiras colunas
+    e chk_conversas_rascunho amarra a quarta ao estado, então escrever só `estado`
+    deixaria a linha incoerente no meio do caminho — e o banco recusaria. Um
+    UPDATE, quatro colunas, os CHECKs validam o resultado.
     """
     await conn.execute(
         """
         update conversas
-           set estado = $2, condominio_id = $3, condominio_pendente = $4
+           set estado = $2, condominio_id = $3, condominio_pendente = $4,
+               rascunho = $5
          where id = $1
         """,
         conversa_id,
         transicao.estado.value,
         transicao.condominio_id,
         transicao.condominio_pendente,
+        transicao.rascunho,
     )
 
 

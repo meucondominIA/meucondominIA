@@ -19,9 +19,9 @@ Uma decisão = UMA mensagem. Não é preferência: uq_mensagens_em_resposta_a é
 único, então o banco só aceita uma resposta por mensagem recebida.
 
 A decisão nomeia a mensagem (Mensagem.MENU), não escreve o texto — a redação é
-do passo 3. E duas decisões DELEGAM, porque não podem ser resolvidas sem I/O:
-qual condomínio é o item N exige a lista (passo 3), e responder dúvida exige
-RAG + LLM (passo 6).
+do passo 3. E três decisões DELEGAM, porque não podem ser resolvidas sem I/O:
+qual condomínio é o item N exige a lista (passo 3), responder dúvida exige
+RAG + LLM (passo 6), e a reserva exige áreas, agenda e escrita (Fase 4).
 
 Transicao só nasce pelos construtores nomeados: a trinca ilegal fica
 irrepresentável aqui, do mesmo jeito que chk_conversas_estado_coerente a torna
@@ -32,7 +32,7 @@ para quem chama, não segunda validação.
 import re
 from datetime import datetime
 from enum import Enum, IntEnum
-from typing import Self
+from typing import Any, Self
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
@@ -47,6 +47,7 @@ class Estado(str, Enum):
     AGUARDANDO_CONFIRMACAO = "aguardando_confirmacao"
     MENU = "menu"
     DUVIDAS = "duvidas"
+    RESERVA = "reserva"
 
 
 class Mensagem(str, Enum):
@@ -62,6 +63,7 @@ class Mensagem(str, Enum):
     CONVITE_PERGUNTA = "convite_pergunta"
     PERGUNTA_VAZIA = "pergunta_vazia"
     SO_ENTENDO_TEXTO = "so_entendo_texto"
+    NADA_AGENDADO = "nada_agendado"
 
 
 ESCAPE = 0
@@ -86,7 +88,7 @@ class OpcaoMenu(IntEnum):
     TROCAR_CONDOMINIO = 9
 
 
-_INDISPONIVEIS = frozenset({OpcaoMenu.SINDICO, OpcaoMenu.RESERVA, OpcaoMenu.OCORRENCIA})
+_INDISPONIVEIS = frozenset({OpcaoMenu.SINDICO, OpcaoMenu.OCORRENCIA})
 
 # Tolera o que as pessoas digitam de verdade: espaço em volta, "1." e "1)"
 # copiados do formato da lista, zero à esquerda. Por extenso não entra — abriria
@@ -95,13 +97,19 @@ _OPCAO = re.compile(r"\s*(\d{1,2})[.)]?\s*")
 
 
 class Transicao(BaseModel):
-    """A trinca completa de destino — o CHECK do banco é sobre as três colunas."""
+    """O destino completo — os CHECKs do banco são sobre as quatro colunas juntas.
+
+    `rascunho` é dict, não modelo tipado: aqui `reserva` é opaca, quem conhece a
+    forma é o motor. Default None porque os outros estados EXIGEM null
+    (chk_conversas_rascunho); só para_reserva o pede, e sem default.
+    """
 
     model_config = ConfigDict(frozen=True)
 
     estado: Estado
     condominio_id: UUID | None
     condominio_pendente: UUID | None
+    rascunho: dict[str, Any] | None = None
 
     @classmethod
     def para_identificacao(cls) -> Self:
@@ -129,12 +137,24 @@ class Transicao(BaseModel):
             estado=Estado.DUVIDAS, condominio_id=condominio, condominio_pendente=None
         )
 
+    @classmethod
+    def para_reserva(cls, condominio: UUID, rascunho: dict[str, Any]) -> Self:
+        return cls(
+            estado=Estado.RESERVA,
+            condominio_id=condominio,
+            condominio_pendente=None,
+            rascunho=rascunho,
+        )
+
 
 class Conversa(BaseModel):
     """O que o roteador precisa saber da conversa — espelha as colunas.
 
-    `ultima_interacao_em` é coluna, mas o roteador não a lê: quem compara com
-    o relógio é o atendimento.
+    Três colunas o roteador NÃO lê, e existem para a costura: o relógio é do
+    atendimento, `telefone` vai para a reserva e `rascunho` para o motor.
+
+    Sem default nas duas novas de propósito: um default esconderia RETURNING
+    incompleto, e rascunho ausente reiniciaria o wizard em silêncio.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -144,6 +164,8 @@ class Conversa(BaseModel):
     condominio_id: UUID | None
     condominio_pendente: UUID | None
     ultima_interacao_em: datetime
+    telefone: str
+    rascunho: dict[str, Any] | None
 
 
 class Responder(BaseModel):
@@ -171,10 +193,22 @@ class DelegarDuvida(BaseModel):
     pergunta: str
 
 
-Decisao = Responder | DelegarIdentificacao | DelegarDuvida
+class DelegarReserva(BaseModel):
+    """O morador entrou ou avançou no wizard; quem interpreta é o motor.
+
+    Não carrega passo nem dados: o roteador sabe que está DENTRO da reserva, não
+    onde. O passo vive no rascunho.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    escolha: str
 
 
-def _opcao(texto: str) -> int | None:
+Decisao = Responder | DelegarIdentificacao | DelegarDuvida | DelegarReserva
+
+
+def opcao(texto: str) -> int | None:
     """Lê a escolha do morador: "2", " 2 " e "2." viram 2; "quero falar com o
     síndico" vira None.
 
@@ -235,7 +269,11 @@ def rotear(
     if tipo is not MessageType.TEXT or texto is None:
         return Responder(mensagem=Mensagem.SO_ENTENDO_TEXTO)
 
-    if precisa_reconfirmar and conversa.estado in (Estado.MENU, Estado.DUVIDAS):
+    if precisa_reconfirmar and conversa.estado in (
+        Estado.MENU,
+        Estado.DUVIDAS,
+        Estado.RESERVA,
+    ):
         return _reconfirmar(conversa)
 
     match conversa.estado:
@@ -247,6 +285,8 @@ def rotear(
             return _menu(conversa, texto)
         case Estado.DUVIDAS:
             return _duvidas(conversa, texto)
+        case Estado.RESERVA:
+            return _reserva(conversa, texto)
 
 
 def _identificacao(texto: str) -> Decisao:
@@ -259,10 +299,10 @@ def _identificacao(texto: str) -> Decisao:
     novo. O 0 é escape nos outros estados, mas aqui não existe menu para voltar,
     e prometer um atalho que não leva a lugar nenhum é pior do que ignorá-lo.
     """
-    opcao = _opcao(texto)
-    if opcao is None or opcao < 1:
+    escolhido = opcao(texto)
+    if escolhido is None or escolhido < 1:
         return Responder(mensagem=Mensagem.CONDOMINIO_NAO_ENTENDIDO)
-    return DelegarIdentificacao(indice=opcao)
+    return DelegarIdentificacao(indice=escolhido)
 
 
 def _confirmacao(conversa: Conversa, texto: str) -> Decisao:
@@ -280,7 +320,7 @@ def _confirmacao(conversa: Conversa, texto: str) -> Decisao:
     if candidato is None:
         return _recomecar_identificacao()
 
-    match _opcao(texto):
+    match opcao(texto):
         case OpcaoConfirmacao.SIM:
             return Responder(
                 mensagem=Mensagem.MENU, transicao=Transicao.para_menu(candidato)
@@ -294,8 +334,8 @@ def _confirmacao(conversa: Conversa, texto: str) -> Decisao:
 def _menu(conversa: Conversa, texto: str) -> Decisao:
     """Morador já identificado, escolhendo o que quer fazer.
 
-    O 1 abre o fluxo de dúvidas — hoje a única opção implementada, e a única que
-    chama IA. 2, 3 e 4 respondem "indisponível" sem prometer prazo. O 9 é a
+    O 1 abre dúvidas (a única que chama IA) e o 2 abre a reserva, que é
+    determinística. 3 e 4 respondem "indisponível" sem prometer prazo. O 9 é a
     saída de quem não é (ou deixou de ser) desse condomínio.
 
     5..8 são reservados e ainda sem dono: caem em MENU_NAO_ENTENDIDO, que fala
@@ -306,21 +346,23 @@ def _menu(conversa: Conversa, texto: str) -> Decisao:
     como se fosse falha soaria repreensão, e o menu já diz o que fazer.
     """
     condominio = _condominio_confirmado(conversa)
-    opcao = _opcao(texto)
+    escolhido = opcao(texto)
 
     # O escape em quem já está no menu é inofensivo: remostra.
-    if opcao is None or opcao == ESCAPE:
+    if escolhido is None or escolhido == ESCAPE:
         return Responder(mensagem=Mensagem.MENU)
 
-    match opcao:
+    match escolhido:
         case OpcaoMenu.DUVIDAS:
             return Responder(
                 mensagem=Mensagem.CONVITE_PERGUNTA,
                 transicao=Transicao.para_duvidas(condominio),
             )
+        case OpcaoMenu.RESERVA:
+            return DelegarReserva(escolha=texto)
         case OpcaoMenu.TROCAR_CONDOMINIO:
             return _recomecar_identificacao()
-        case _ if opcao in _INDISPONIVEIS:
+        case _ if escolhido in _INDISPONIVEIS:
             return Responder(mensagem=Mensagem.OPCAO_INDISPONIVEL)
         case _:
             return Responder(mensagem=Mensagem.MENU_NAO_ENTENDIDO)
@@ -338,7 +380,7 @@ def _duvidas(conversa: Conversa, texto: str) -> Decisao:
     """
     condominio = _condominio_confirmado(conversa)
 
-    if _opcao(texto) == ESCAPE:
+    if opcao(texto) == ESCAPE:
         return Responder(
             mensagem=Mensagem.MENU, transicao=Transicao.para_menu(condominio)
         )
@@ -349,10 +391,29 @@ def _duvidas(conversa: Conversa, texto: str) -> Decisao:
     return DelegarDuvida(pergunta=pergunta)
 
 
-def _condominio_confirmado(conversa: Conversa) -> UUID:
-    """O condomínio da conversa, nos dois estados em que ele TEM que existir.
+def _reserva(conversa: Conversa, texto: str) -> Decisao:
+    """Dentro do wizard — aqui quase tudo é escolha de tela.
 
-    Em menu e duvidas o chk_conversas_estado_coerente garante condominio_id
+    Só o 0 é comando, e é resolvido AQUI: é a saída que precisa funcionar mesmo
+    com o rascunho ilegível ou a leitura de áreas falhando. Nada foi gravado até
+    a confirmação, então sair não cancela nada — só não agenda.
+
+    Todo o resto delega: o roteador não sabe qual passo é, e não deve saber.
+    """
+    condominio = _condominio_confirmado(conversa)
+
+    if opcao(texto) == ESCAPE:
+        return Responder(
+            mensagem=Mensagem.NADA_AGENDADO,
+            transicao=Transicao.para_menu(condominio),
+        )
+    return DelegarReserva(escolha=texto)
+
+
+def _condominio_confirmado(conversa: Conversa) -> UUID:
+    """O condomínio da conversa, nos estados em que ele TEM que existir.
+
+    Em menu, duvidas e reserva o chk_conversas_estado_coerente garante condominio_id
     preenchido, então chegar aqui com None significa que alguém rodou UPDATE na
     mão no banco ou que a constraint caiu. Falha alto em vez de adivinhar: um
     palpite aqui é exatamente o morador do condomínio A recebendo as regras do B.

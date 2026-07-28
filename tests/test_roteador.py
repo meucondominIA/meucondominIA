@@ -17,6 +17,7 @@ from roteador import (
     Conversa,
     DelegarDuvida,
     DelegarIdentificacao,
+    DelegarReserva,
     Estado,
     Mensagem,
     Responder,
@@ -30,13 +31,17 @@ CANDIDATO = uuid4()
 _AGORA = datetime(2026, 7, 21, 12, 0, tzinfo=timezone.utc)
 
 
-def _conversa(estado: Estado, *, condominio=None, pendente=None) -> Conversa:
+def _conversa(
+    estado: Estado, *, condominio=None, pendente=None, rascunho=None
+) -> Conversa:
     return Conversa(
         id=uuid4(),
         estado=estado,
         condominio_id=condominio,
         condominio_pendente=pendente,
         ultima_interacao_em=_AGORA,
+        telefone="5555999999999",
+        rascunho=rascunho,
     )
 
 
@@ -138,9 +143,14 @@ def test_menu_opcao_1_abre_duvidas():
     )
 
 
-@pytest.mark.parametrize("texto", ["2", "3", "4"])
+@pytest.mark.parametrize("texto", ["3", "4"])
 def test_menu_opcoes_nao_implementadas(texto):
     assert _texto(MENU, texto) == Responder(mensagem=Mensagem.OPCAO_INDISPONIVEL)
+
+
+def test_menu_opcao_2_abre_a_reserva():
+    """Deixou de ser muro: o ramo 2 delega ao motor, como o 1 delega à geração."""
+    assert _texto(MENU, "2") == DelegarReserva(escolha="2")
 
 
 def test_menu_trocar_condominio_zera_o_tenant():
@@ -228,6 +238,53 @@ def test_duvidas_audio():
     assert _audio(DUVIDAS) == Responder(mensagem=Mensagem.SO_ENTENDO_TEXTO)
 
 
+# ── reserva ──────────────────────────────────────────────────────────────────
+
+RESERVA = _conversa(
+    Estado.RESERVA, condominio=CONDOMINIO, rascunho={"passo": "area"}
+)
+
+
+def test_reserva_escape_sai_sem_agendar():
+    """O 0 é resolvido no roteador: funciona mesmo com rascunho ilegível.
+    para_menu limpa o rascunho por construção — o CHECK exige."""
+    decisao = _texto(RESERVA, "0")
+    assert decisao == Responder(
+        mensagem=Mensagem.NADA_AGENDADO, transicao=Transicao.para_menu(CONDOMINIO)
+    )
+    assert decisao.transicao.rascunho is None
+
+
+@pytest.mark.parametrize("texto", ["1", "9", "99", "abc", "   ", "25/07"])
+def test_reserva_tudo_que_nao_e_escape_delega(texto):
+    """O roteador trata `reserva` como opaca: quem lê o passo é o motor."""
+    assert _texto(RESERVA, texto) == DelegarReserva(escolha=texto)
+
+
+def test_reserva_nao_olha_o_passo():
+    """O mesmo texto delega igual, esteja o rascunho em qualquer passo."""
+    for passo in ("area", "dia", "confirmacao"):
+        conversa = _conversa(
+            Estado.RESERVA, condominio=CONDOMINIO, rascunho={"passo": passo}
+        )
+        assert _texto(conversa, "1") == DelegarReserva(escolha="1")
+
+
+def test_reserva_com_sessao_expirada_reconfirma_antes_de_gravar():
+    """Reserva é ESCRITA: gravar no tenant não reconfirmado é pior que responder
+    dúvida errada. O rascunho abandonado some — nada foi gravado."""
+    decisao = _texto(RESERVA, "1", precisa_reconfirmar=True)
+    assert decisao == Responder(
+        mensagem=Mensagem.RECONFIRMAR_CONDOMINIO,
+        transicao=Transicao.para_confirmacao(CONDOMINIO),
+    )
+    assert decisao.transicao.rascunho is None
+
+
+def test_reserva_audio():
+    assert _audio(RESERVA) == Responder(mensagem=Mensagem.SO_ENTENDO_TEXTO)
+
+
 def test_duvidas_nao_muda_de_estado_ao_perguntar():
     assert isinstance(_texto(DUVIDAS, "Posso ter cachorro?"), DelegarDuvida)
 
@@ -242,10 +299,17 @@ def test_rotear_e_sincrona():
 
 def test_estados_do_python_batem_com_o_check_do_banco():
     """Guarda de drift: acrescentar estado no Python sem migration falha aqui."""
-    sql = next(
-        pathlib.Path("supabase/migrations").glob("*_conversas_estado.sql")
-    ).read_text(encoding="utf-8")
-    lista = re.search(r"estado in \(([^)]+)\)", sql, re.IGNORECASE).group(1)
+    # Varre TODAS as migrations em ordem: o CHECK é dropado e recriado, então
+    # vale a ÚLTIMA recriação. O \s+ evita casar chk_conversas_estado_coerente,
+    # cujo `estado in (...)` lista só um subconjunto.
+    padrao = re.compile(
+        r"add constraint chk_conversas_estado\s+check\s*\(\s*estado in \(([^)]+)\)",
+        re.IGNORECASE,
+    )
+    lista = None
+    for arquivo in sorted(pathlib.Path("supabase/migrations").glob("*.sql")):
+        for achado in padrao.finditer(arquivo.read_text(encoding="utf-8")):
+            lista = achado.group(1)
     no_banco = set(re.findall(r"'([a-z_]+)'", lista))
     assert no_banco == {estado.value for estado in Estado}
 
@@ -257,19 +321,26 @@ def test_estados_do_python_batem_com_o_check_do_banco():
         Transicao.para_confirmacao(CANDIDATO),
         Transicao.para_menu(CONDOMINIO),
         Transicao.para_duvidas(CONDOMINIO),
+        Transicao.para_reserva(CONDOMINIO, {"passo": "area"}),
     ],
 )
-def test_construtores_produzem_trinca_coerente(transicao):
-    """Mesma regra do chk_conversas_estado_coerente, em forma de teste."""
+def test_construtores_produzem_destino_coerente(transicao):
+    """Mesma regra do chk_conversas_estado_coerente + chk_conversas_rascunho,
+    em forma de teste."""
     match transicao.estado:
         case Estado.IDENTIFICACAO:
             assert transicao.condominio_id is None
             assert transicao.condominio_pendente is None
         case Estado.AGUARDANDO_CONFIRMACAO:
             assert transicao.condominio_id is None
-        case Estado.MENU | Estado.DUVIDAS:
+        case Estado.MENU | Estado.DUVIDAS | Estado.RESERVA:
             assert transicao.condominio_id is not None
             assert transicao.condominio_pendente is None
+
+    if transicao.estado is Estado.RESERVA:
+        assert isinstance(transicao.rascunho, dict)
+    else:
+        assert transicao.rascunho is None
 
 
 def test_menu_sem_condominio_falha_alto():
@@ -287,12 +358,13 @@ def test_toda_mensagem_declarada_e_alcancavel():
         _conversa(Estado.AGUARDANDO_CONFIRMACAO),
         MENU,
         DUVIDAS,
+        RESERVA,
     ]
     emitidas = set()
     for conversa in conversas:
         emitidas.add(_audio(conversa).mensagem)
         for reconfirmar in (False, True):
-            for texto in ("1", "2", "5", "0", "9", "oi", "   "):
+            for texto in ("1", "2", "3", "5", "0", "9", "oi", "   "):
                 decisao = _texto(conversa, texto, precisa_reconfirmar=reconfirmar)
                 if isinstance(decisao, Responder):
                     emitidas.add(decisao.mensagem)

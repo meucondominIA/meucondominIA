@@ -43,7 +43,16 @@ class Settings(BaseSettings):
     sweeper_grace_seconds: int = 300
     sweeper_batch_size: int = 20
 
-    sessao_ttl_horas: int = 24
+    # Espelha o "Resolver atendimento sem interação" do painel do Z-PRO, que manda
+    # a despedida ao morador. Os dois números têm que andar juntos: se o nosso for
+    # mais lento, o morador lê "atendimento encerrado" e o bot segue como se nada.
+    sessao_ttl_horas: int = 1
+    # Só a CADÊNCIA da varredura; o corte é o sessao_ttl_horas acima. Atraso aqui
+    # não muda o que o morador vê — o comportamento sai de _sessao_expirada, que
+    # compara o relógio na hora da mensagem. Isto só arruma a contabilidade.
+    encerrador_interval_seconds: int = 600
+
+    reserva_janela_dias: int = 14
 
 
 settings = Settings()

@@ -10,9 +10,12 @@ então rótulo e destino não podem divergir em silêncio.
 """
 
 from collections.abc import Sequence
+from datetime import date
 from enum import Enum
 
+from areas import AreaReservavel
 from condominios import CondominioElegivel
+from reserva import VER_MAIS, MensagemReserva, PaginaDias
 from roteador import Mensagem, OpcaoMenu
 
 
@@ -23,7 +26,7 @@ class MensagemAtendimento(str, Enum):
     REGRA_NAO_ENCONTRADA = "regra_nao_encontrada"
 
 
-Identidade = Mensagem | MensagemAtendimento
+Identidade = Mensagem | MensagemAtendimento | MensagemReserva
 
 _ROTULOS = {
     OpcaoMenu.DUVIDAS: "Tirar dúvidas sobre o condomínio",
@@ -41,6 +44,23 @@ _MENU = "Como posso ajudar?\n\n{opcoes}\n\nResponda com o número.".format(
 )
 
 _SIM_NAO = "1 - Sim\n2 - Não"
+
+# Na reserva o "não" e o escape levam ao mesmo lugar, então a opção diz os dois.
+_SIM_NAO_RESERVA = "1 - Sim\n2 - Não, voltar ao menu"
+_VOLTAR = "0 - Voltar ao menu"
+
+# strftime("%a") devolve 'Sat': o locale do container é C.UTF-8 e pt_BR não está
+# instalado (medido 27/07/2026). Tupla explícita, indexada por weekday().
+_SEMANA = ("seg", "ter", "qua", "qui", "sex", "sáb", "dom")
+_SEMANA_LONGO = (
+    "segunda-feira",
+    "terça-feira",
+    "quarta-feira",
+    "quinta-feira",
+    "sexta-feira",
+    "sábado",
+    "domingo",
+)
 
 _CONSTANTES: dict[Identidade, str] = {
     Mensagem.MENU: _MENU,
@@ -65,13 +85,43 @@ _CONSTANTES: dict[Identidade, str] = {
     MensagemAtendimento.REGRA_NAO_ENCONTRADA: (
         "Não encontrei essa regra no regimento. Sugiro falar com o síndico."
     ),
+    Mensagem.NADA_AGENDADO: f"Ok, não agendei nada.\n\n{_MENU}",
+    MensagemReserva.SEM_AREAS: (
+        f"Esse condomínio ainda não tem área para reservar por aqui.\n\n{_MENU}"
+    ),
 }
 
 
-def _numerar(condominios: Sequence[CondominioElegivel]) -> str:
-    return "\n".join(
-        f"{posicao} - {c.nome}" for posicao, c in enumerate(condominios, start=1)
+def _numerar(rotulos: Sequence[str]) -> str:
+    return "\n".join(f"{posicao} - {r}" for posicao, r in enumerate(rotulos, start=1))
+
+
+def _curto(dia: date) -> str:
+    return f"{_SEMANA[dia.weekday()]} {dia:%d/%m}"
+
+
+def _longo(dia: date) -> str:
+    return f"{_SEMANA_LONGO[dia.weekday()]}, {dia:%d/%m}"
+
+
+def _tela_areas(areas: Sequence[AreaReservavel]) -> str:
+    return (
+        f"{_numerar([a.nome for a in areas])}\n\nResponda com o número.\n{_VOLTAR}"
     )
+
+
+def _tela_dias(area: str, pagina: PaginaDias) -> str:
+    """A lista e o "ver mais" saem das MESMAS constantes que o motor compara —
+    número e rótulo não podem divergir em silêncio."""
+    linhas = [f"{area} — escolha a data:", "", _numerar([_curto(d) for d in pagina.dias])]
+    if not pagina.ultima:
+        linhas += ["", f"{VER_MAIS} - Ver mais datas"]
+    linhas += ["", _VOLTAR]
+    return "\n".join(linhas)
+
+
+def _tela_confirmar(area: str, dia: date) -> str:
+    return f"Confirmar a reserva?\n\n{area}\n{_longo(dia)}\n\n{_SIM_NAO_RESERVA}"
 
 
 def renderizar(
@@ -79,12 +129,56 @@ def renderizar(
     *,
     condominios: Sequence[CondominioElegivel] = (),
     nome_condominio: str | None = None,
+    areas: Sequence[AreaReservavel] = (),
+    area: str | None = None,
+    pagina: PaginaDias | None = None,
+    dia: date | None = None,
+    aviso: MensagemReserva | None = None,
 ) -> str:
     """Traduz a identidade da mensagem no texto que o morador recebe.
 
     Contexto faltando levanta: é bug de chamada, não entrada do morador.
     """
     match identidade:
+        case MensagemReserva.ESCOLHER_AREA:
+            return (
+                "Qual área você quer reservar?\n\n"
+                f"{_tela_areas(_exigir(areas, 'a lista de áreas'))}"
+            )
+        case MensagemReserva.AREA_NAO_ENTENDIDA:
+            return (
+                "Não tenho essa área.\n\n"
+                f"{_tela_areas(_exigir(areas, 'a lista de áreas'))}"
+            )
+        case MensagemReserva.LISTA_DIAS:
+            corpo = _tela_dias(_exigir(area, "o nome da área"), _exigir(pagina, "a página"))
+            return f"{_PREFIXOS[aviso]}{corpo}" if aviso else corpo
+        case MensagemReserva.DIA_NAO_ENTENDIDO:
+            corpo = _tela_dias(_exigir(area, "o nome da área"), _exigir(pagina, "a página"))
+            return f"Não tenho essa data.\n\n{corpo}"
+        case MensagemReserva.ULTIMAS_DATAS:
+            corpo = _tela_dias(_exigir(area, "o nome da área"), _exigir(pagina, "a página"))
+            return f"Essas são as últimas datas que consigo agendar.\n\n{corpo}"
+        case MensagemReserva.SEM_DATAS:
+            return (
+                f"{_exigir(area, 'o nome da área')} está sem data livre no período "
+                f"que consigo agendar.\n\n{_MENU}"
+            )
+        case MensagemReserva.CONFIRMAR:
+            return _tela_confirmar(
+                _exigir(area, "o nome da área"), _exigir(dia, "a data")
+            )
+        case MensagemReserva.CONFIRMACAO_NAO_ENTENDIDA:
+            corpo = _tela_confirmar(
+                _exigir(area, "o nome da área"), _exigir(dia, "a data")
+            )
+            return f"Só preciso de 1 ou 2.\n\n{corpo}"
+        case MensagemReserva.RESERVA_REGISTRADA:
+            return (
+                "Pronto! Registrei seu pedido:\n\n"
+                f"{_exigir(area, 'o nome da área')}\n{_longo(_exigir(dia, 'a data'))}"
+                f"\n\nEstá pendente de aprovação do síndico.\n\n{_MENU}"
+            )
         case Mensagem.PEDIR_CONDOMINIO:
             return (
                 "Olá! Para eu te ajudar, escolha o seu condomínio:\n\n"
@@ -111,13 +205,28 @@ def renderizar(
             return _CONSTANTES[identidade]
 
 
+_PREFIXOS = {
+    MensagemReserva.DATA_TOMADA: (
+        "Essa data acabou de ser reservada por outro morador.\n"
+        "Veja as datas atualizadas:\n\n"
+    )
+}
+
+
 def _exigir_lista(condominios: Sequence[CondominioElegivel]) -> str:
     if not condominios:
         raise ValueError("mensagem exige a lista de condomínios, e ela veio vazia")
-    return _numerar(condominios)
+    return _numerar([c.nome for c in condominios])
 
 
 def _exigir_nome(nome: str | None) -> str:
     if not nome:
         raise ValueError("mensagem exige o nome do condomínio, e ele veio vazio")
     return nome
+
+
+def _exigir(valor, oque: str):
+    """Contexto da reserva que a mensagem cita e não chegou."""
+    if valor is None or (hasattr(valor, "__len__") and not len(valor)):
+        raise ValueError(f"mensagem da reserva exige {oque}, e veio vazio")
+    return valor

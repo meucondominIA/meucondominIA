@@ -39,6 +39,8 @@ LINHA_CONVERSA = {
     "condominio_id": None,
     "condominio_pendente": None,
     "ultima_interacao_em": _AGORA,
+    "telefone": "5555999999999",
+    "rascunho": None,
 }
 CONVERSA = Conversa(
     id=CONVERSA_ID,
@@ -46,6 +48,8 @@ CONVERSA = Conversa(
     condominio_id=None,
     condominio_pendente=None,
     ultima_interacao_em=_AGORA,
+    telefone="5555999999999",
+    rascunho=None,
 )
 
 RESPOSTA = "Olá! Escolha o seu condomínio:\n\n1 - Edifício X"
@@ -131,7 +135,7 @@ def deps(monkeypatch):
     conn = _FakeConn()
     mocks = SimpleNamespace(
         conn=conn,
-        upsert=AsyncMock(return_value=CONVERSA),
+        upsert=AsyncMock(return_value=(CONVERSA, False)),
         entrada=AsyncMock(return_value=(ENTRADA_ID, True)),
         ja_existe=AsyncMock(return_value=False),
         responder=AsyncMock(return_value=(RESPOSTA, None)),
@@ -142,7 +146,7 @@ def deps(monkeypatch):
         enviar=AsyncMock(),
     )
     monkeypatch.setattr(processador, "get_pool", lambda: _FakePool(conn))
-    monkeypatch.setattr(processador, "upsert_conversa_ativa", mocks.upsert)
+    monkeypatch.setattr(processador, "conversa_ativa", mocks.upsert)
     monkeypatch.setattr(processador, "registrar_entrada", mocks.entrada)
     monkeypatch.setattr(processador, "saida_ja_existe", mocks.ja_existe)
     monkeypatch.setattr(processador, "responder", mocks.responder)

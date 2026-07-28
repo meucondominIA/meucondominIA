@@ -32,6 +32,7 @@ from fastapi import FastAPI
 import chat
 import embeddings
 from db import criar_pool, fechar_pool
+from encerrador import rodar_encerrador
 from sweeper import rodar_sweeper
 from webhook import router
 from zpro_client import criar_cliente, fechar_cliente
@@ -39,10 +40,10 @@ from zpro_client import criar_cliente, fechar_cliente
 logging.basicConfig(level=logging.INFO)
 
 
-async def _encerrar_sweeper(sweeper: asyncio.Task) -> None:
-    sweeper.cancel()
+async def _cancelar(tarefa: asyncio.Task) -> None:
+    tarefa.cancel()
     with suppress(asyncio.CancelledError):
-        await sweeper
+        await tarefa
 
 
 @asynccontextmanager
@@ -61,7 +62,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         recursos.push_async_callback(chat.fechar_cliente)
 
         sweeper = asyncio.create_task(rodar_sweeper(), name="sweeper")
-        recursos.push_async_callback(_encerrar_sweeper, sweeper)
+        recursos.push_async_callback(_cancelar, sweeper)
+
+        encerrador = asyncio.create_task(rodar_encerrador(), name="encerrador")
+        recursos.push_async_callback(_cancelar, encerrador)
 
         yield
 
