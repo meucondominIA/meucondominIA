@@ -350,3 +350,78 @@ def test_ciclo_ponta_a_ponta(monkeypatch):
     marcar.assert_awaited_once()
     assert marcar.await_args.args[1] == "E2E-1"
     assert marcar.await_args.args[2] is StatusEvento.PROCESSADO
+
+
+# ── o upload adiado da ocorrência (Fase 4 · Etapa 4) ─────────────────────────
+
+
+def _pendente():
+    from atendimento import FotoPendente
+    from ocorrencia import RascunhoFoto, TipoSolicitacao
+    from zpro_models import MidiaRecebida
+
+    return FotoPendente(
+        midia=MidiaRecebida(conteudo=b"\xff\xd8\xff", mimetype="image/jpeg", sha256="ab"),
+        condominio_id=CONDOMINIO_ID,
+        rascunho=RascunhoFoto(tipo=TipoSolicitacao.RECLAMACAO, descricao="vazou"),
+        texto=None,
+    )
+
+
+def _com_foto(deps, monkeypatch, guardar):
+    """O atendimento devolve FotoPendente; o upload é o que estamos testando."""
+    import anexos
+
+    deps.responder = AsyncMock(return_value=_pendente())
+    monkeypatch.setattr(processador, "responder", deps.responder)
+    monkeypatch.setattr(anexos, "guardar", guardar)
+    asyncio.run(processador.processar_mensagem(_msg("foto")))
+    return deps.enviar.await_args.args[0].text
+
+
+def test_upload_roda_fora_da_conexao(deps, monkeypatch):
+    """A regra de ouro em forma de teste: quando anexos.guardar é chamado, a
+    conexão do pool já voltou."""
+    from ocorrencia import Anexo
+
+    visto = {}
+
+    async def guardar(midia, *, condominio_id):
+        visto["conexao_presa"] = processador.get_pool().em_uso
+        return Anexo(bucket="anexos", caminho="c/ab.jpg", mimetype="image/jpeg",
+                     bytes=3, sha256="ab")
+
+    _com_foto(deps, monkeypatch, guardar)
+    assert visto["conexao_presa"] is False
+
+
+def test_recusa_do_arquivo_e_indisponibilidade_dao_telas_diferentes(deps, monkeypatch):
+    """Recusa pede OUTRA foto; indisponibilidade pede a MESMA de novo. Trocar as
+    duas manda o morador repetir algo que nunca vai funcionar."""
+    import anexos
+
+    async def recusa(midia, *, condominio_id):
+        raise anexos.AnexoRecusadoError("grande demais")
+
+    async def indisponivel(midia, *, condominio_id):
+        raise anexos.AnexoIndisponivelError("storage fora do ar")
+
+    texto_recusa = _com_foto(deps, monkeypatch, recusa)
+    texto_falha = _com_foto(deps, monkeypatch, indisponivel)
+
+    assert texto_recusa != texto_falha
+    assert "não é uma imagem" in texto_recusa
+    assert "não consegui guardar" in texto_falha.lower()
+
+
+def test_falha_no_upload_regrava_o_mesmo_rascunho(deps, monkeypatch):
+    """O morador não pode perder a descrição que já digitou."""
+    import anexos
+
+    async def indisponivel(midia, *, condominio_id):
+        raise anexos.AnexoIndisponivelError("fora do ar")
+
+    _com_foto(deps, monkeypatch, indisponivel)
+    transicao = deps.transicao.await_args.args[2]
+    assert transicao.estado is Estado.OCORRENCIA
+    assert transicao.rascunho["descricao"] == "vazou"

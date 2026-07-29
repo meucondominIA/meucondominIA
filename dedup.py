@@ -28,10 +28,20 @@ async def registrar_mensagem(
 async def marcar_status(
     conn: asyncpg.Connection, message_id: str, status: StatusEvento
 ) -> None:
+    """Grava o desfecho e, em 'processado', descarta o base64 da mídia.
+
+    O payload é o staging durável da foto até o upload (o Z-PRO não reenvia).
+    Depois disso ela está no Storage, e ~49 kB por foto no Postgres é blob store.
+    Em 'falhou' o base64 fica: é o que o sweeper precisa para reprocessar.
+    """
     await conn.execute(
         """
         update webhook_events
-        set status = $1, processado_em = now()
+        set status = $1,
+            processado_em = now(),
+            payload = case when $1 = 'processado'
+                           then payload #- '{msg,base64}'
+                           else payload end
         where message_id = $2
         """,
         status.value,

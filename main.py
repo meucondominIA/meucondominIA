@@ -29,10 +29,12 @@ from contextlib import AsyncExitStack, asynccontextmanager, suppress
 
 from fastapi import FastAPI
 
+import anexos
 import chat
 import embeddings
 from db import criar_pool, fechar_pool
 from encerrador import rodar_encerrador
+from faxina import rodar_faxina
 from sweeper import rodar_sweeper
 from webhook import router
 from zpro_client import criar_cliente, fechar_cliente
@@ -61,11 +63,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await chat.criar_cliente()
         recursos.push_async_callback(chat.fechar_cliente)
 
+        await anexos.criar_cliente()
+        recursos.push_async_callback(anexos.fechar_cliente)
+
         sweeper = asyncio.create_task(rodar_sweeper(), name="sweeper")
         recursos.push_async_callback(_cancelar, sweeper)
 
         encerrador = asyncio.create_task(rodar_encerrador(), name="encerrador")
         recursos.push_async_callback(_cancelar, encerrador)
+
+        faxina = asyncio.create_task(rodar_faxina(), name="faxina")
+        recursos.push_async_callback(_cancelar, faxina)
 
         yield
 

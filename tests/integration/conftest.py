@@ -105,8 +105,8 @@ def rodar_concorrente(pg_dsn):
                 faxina = await asyncpg.connect(pg_dsn)
                 try:
                     await faxina.execute(
-                        "truncate reservas, mensagens, conversas, areas_comuns, "
-                        "condominios cascade"
+                        "truncate solicitacoes, reservas, mensagens, conversas, "
+                        "areas_comuns, condominios cascade"
                     )
                 finally:
                     await faxina.close()

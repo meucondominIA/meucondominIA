@@ -10,6 +10,7 @@ import asyncio
 
 import pytest
 
+import anexos
 import chat
 import embeddings
 import main
@@ -40,6 +41,8 @@ def _instrumentar(monkeypatch, log, *, criar_falha=None, fechar_falha=None):
     monkeypatch.setattr(embeddings, "fechar_cliente", _fechar("embeddings"))
     monkeypatch.setattr(chat, "criar_cliente", _criar("chat"))
     monkeypatch.setattr(chat, "fechar_cliente", _fechar("chat"))
+    monkeypatch.setattr(anexos, "criar_cliente", _criar("anexos"))
+    monkeypatch.setattr(anexos, "fechar_cliente", _fechar("anexos"))
 
     async def _sweeper_falso():
         try:
@@ -72,7 +75,9 @@ def test_cria_na_ordem_e_fecha_na_inversa(monkeypatch):
         "criou zpro",
         "criou embeddings",
         "criou chat",
+        "criou anexos",
         "sweeper cancelado",
+        "fechou anexos",
         "fechou chat",
         "fechou embeddings",
         "fechou zpro",

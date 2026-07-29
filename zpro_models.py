@@ -10,9 +10,14 @@ Doc Pydantic v2 — alias: https://docs.pydantic.dev/latest/concepts/alias/
 pydantic -> valida/coeage -> objeto tipado
 """
 
+import base64
+import hashlib
+import logging
 import re
 from enum import Enum
 from pydantic import BaseModel, ConfigDict, Field
+
+logger = logging.getLogger(__name__)
 
 
 # Modelos do payload do Z-PRO, json_ZPRO tem o retorno json dele
@@ -37,10 +42,27 @@ class ZproExtendedText(_ZproBase):
     text: str | None = None
 
 
+class ZproImage(_ZproBase):
+    """O bloco de imagem do Baileys. Só os campos que usamos: url, mediaKey,
+    directPath e fileEncSha256 são a rota CIFRADA do CDN, que ignoramos — o
+    Z-PRO já entrega o arquivo decifrado em msg.base64.
+
+    `fileLength` chega como string no payload real; o Pydantic coage.
+    """
+
+    mimetype: str | None = None
+    caption: str | None = None
+    file_sha256: str | None = Field(default=None, validation_alias="fileSha256")
+    file_length: int | None = Field(default=None, validation_alias="fileLength")
+
+
 class ZproMessageContent(_ZproBase):
     conversation: str | None = None
     extended_text_message: ZproExtendedText | None = Field(
         default=None, validation_alias="extendedTextMessage"
+    )
+    image_message: ZproImage | None = Field(
+        default=None, validation_alias="imageMessage"
     )
 
 
@@ -51,6 +73,9 @@ class ZproMsg(_ZproBase):
     )
     push_name: str | None = Field(default=None, validation_alias="pushName")
     message: ZproMessageContent | None = None
+    # O arquivo DECIFRADO, inline. Verificado por envio real em 28/07/2026: só
+    # aparece em mensagem de mídia, e o sha256 do conteúdo bate com fileSha256.
+    base64: str | None = None
 
 
 class ZproWhatsapp(_ZproBase):
@@ -91,7 +116,22 @@ class ZproWebhookPayload(_ZproBase):
 
 class MessageType(str, Enum):
     TEXT = "text"
-    UNSUPPORTED = "unsupported"  # áudio, imagem, etc. — tratamos na 2.x
+    IMAGE = "image"
+    UNSUPPORTED = "unsupported"  # áudio, documento — o que sabemos receber e não usar
+
+class MidiaRecebida(BaseModel):
+    """A mídia já traduzida: bytes decifrados, tipo e digest em hex.
+
+    Hex e não o base64 do fileSha256 porque o digest vira nome de arquivo no
+    Storage, e base64 tem '/' e '+'.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    conteudo: bytes
+    mimetype: str
+    sha256: str
+
 
 #Contrato/Resultado
 class IncomingMessage(BaseModel):
@@ -102,6 +142,7 @@ class IncomingMessage(BaseModel):
     text: str | None
     message_type: MessageType
     push_name: str | None
+    midia: MidiaRecebida | None = None
 
     timestamp: int | None
     # Contexto Z-PRO (guardado desde já p/ multi-tenant por canal no futuro)
@@ -131,13 +172,46 @@ def normalize_phone(value: str | None) -> str | None:
 
 
 def _extract_text(message: ZproMessageContent | None) -> str | None:
+    """A legenda da foto entra como texto: para o core ela é o que o morador
+    escreveu, e de onde veio não importa."""
     if message is None:
         return None
     if message.conversation:
         return message.conversation
     if message.extended_text_message and message.extended_text_message.text:
         return message.extended_text_message.text
+    if message.image_message and message.image_message.caption:
+        return message.image_message.caption
     return None
+
+
+def _extract_midia(msg: ZproMsg) -> MidiaRecebida | None:
+    """Decodifica e CONFERE o digest contra o que o WhatsApp declarou.
+
+    Falha (base64 torto, sha divergente) devolve None em vez de levantar: a
+    mensagem segue como texto, o wizard pede a foto de novo e o morador reenvia.
+    Levantar aqui daria 200 mudo e deixaria a pessoa esperando.
+    """
+    imagem = msg.message.image_message if msg.message else None
+    if imagem is None or not msg.base64:
+        return None
+
+    try:
+        conteudo = base64.b64decode(msg.base64, validate=True)
+    except (ValueError, TypeError):
+        logger.error("mídia: base64 ilegível — message_id=%s", msg.key.id)
+        return None
+
+    digest = hashlib.sha256(conteudo).digest()
+    if imagem.file_sha256 and base64.b64encode(digest).decode() != imagem.file_sha256:
+        logger.error("mídia: sha256 não confere — message_id=%s", msg.key.id)
+        return None
+
+    return MidiaRecebida(
+        conteudo=conteudo,
+        mimetype=imagem.mimetype or "application/octet-stream",
+        sha256=digest.hex(),
+    )
 
 
 def parse_zpro_webhook(raw: dict) -> IncomingMessage:
@@ -171,7 +245,11 @@ def parse_zpro_webhook(raw: dict) -> IncomingMessage:
         raise IgnoreMessage("sem telefone identificável")
 
     text = _extract_text(msg.message)
-    message_type = MessageType.TEXT if text else MessageType.UNSUPPORTED
+    midia = _extract_midia(msg)
+    if midia is not None:
+        message_type = MessageType.IMAGE
+    else:
+        message_type = MessageType.TEXT if text else MessageType.UNSUPPORTED
 
     push_name = msg.push_name or (
         ticket.contact.name if ticket and ticket.contact else None
@@ -183,6 +261,7 @@ def parse_zpro_webhook(raw: dict) -> IncomingMessage:
         text=text,
         message_type=message_type,
         push_name=push_name,
+        midia=midia,
         timestamp=msg.message_timestamp,
         zpro_ticket_id=ticket.id if ticket else None,
         zpro_whatsapp_id=ticket.whatsapp_id if ticket else None,

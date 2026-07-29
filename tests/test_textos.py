@@ -12,6 +12,7 @@ import pytest
 
 from areas import AreaReservavel
 from condominios import CondominioElegivel
+from ocorrencia import Anexo, MensagemOcorrencia, TipoSolicitacao
 from reserva import MensagemReserva, montar_pagina
 from roteador import Mensagem, OpcaoMenu
 from textos import MensagemAtendimento, renderizar
@@ -23,6 +24,14 @@ LISTA = [
 AREAS = [AreaReservavel(id=uuid4(), nome="Salão de Festas")]
 PAGINA = montar_pagina([date(2026, 8, d) for d in range(1, 16)], pagina=0)
 
+ANEXO = Anexo(
+    bucket="anexos",
+    caminho="cond/sol/abc.jpg",
+    mimetype="image/jpeg",
+    bytes=111582,
+    sha256="abc",
+)
+
 _CONTEXTO = dict(
     condominios=LISTA,
     nome_condominio="Edifício Alfa",
@@ -30,6 +39,9 @@ _CONTEXTO = dict(
     area="Salão de Festas",
     pagina=PAGINA,
     dia=date(2026, 8, 1),
+    tipo=TipoSolicitacao.RECLAMACAO,
+    descricao="Vazamento no 3º andar",
+    anexos=[ANEXO],
 )
 
 _SEM_CONTEXTO = [
@@ -52,7 +64,10 @@ _PREFIXO = {MensagemReserva.DATA_TOMADA}
 def _todas_as_identidades():
     return [
         i
-        for i in list(Mensagem) + list(MensagemAtendimento) + list(MensagemReserva)
+        for i in list(Mensagem)
+        + list(MensagemAtendimento)
+        + list(MensagemReserva)
+        + list(MensagemOcorrencia)
         if i not in _PREFIXO
     ]
 
@@ -68,7 +83,10 @@ def test_identidades_nao_colidem_entre_os_enums():
     """str enums de valor igual são == e têm o mesmo hash: o braço errado do
     match capturaria a mensagem (CONFIRMACAO_NAO_ENTENDIDA existe nos dois)."""
     valores = [
-        i.value for i in list(Mensagem) + list(MensagemAtendimento) + list(MensagemReserva)
+        i.value for i in list(Mensagem)
+        + list(MensagemAtendimento)
+        + list(MensagemReserva)
+        + list(MensagemOcorrencia)
     ]
     assert len(valores) == len(set(valores))
 

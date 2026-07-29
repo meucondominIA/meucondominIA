@@ -83,7 +83,8 @@ create table public.mensagens (
   id uuid primary key default gen_random_uuid(),
   conversa_id uuid not null references public.conversas (id) on delete cascade,
   papel text not null check (papel in ('morador', 'assistente')),
-  tipo text not null default 'text' check (tipo in ('text', 'unsupported')),
+  tipo text not null default 'text'
+    constraint mensagens_tipo_check check (tipo in ('text', 'image', 'unsupported')),
   conteudo text,
   message_id text,
   em_resposta_a uuid references public.mensagens (id) on delete set null,
@@ -141,7 +142,8 @@ alter table public.regras
   alter column embedding set not null;
 
 -- estado da conversa (20260721145648) + estado do wizard de reserva
--- (Fase 4 · Etapa 1, 20260725211219): +reserva, +rascunho, +chk_conversas_rascunho.
+-- (Fase 4 · Etapa 1, 20260727124521) + estado do wizard de ocorrência
+-- (Fase 4 · Etapa 4, 20260728171232): +reserva, +ocorrencia, +rascunho.
 -- Forma FINAL (schema.sql é construído do zero — sem o drop/recria da migration).
 alter table public.conversas
   add column estado text not null default 'identificacao';
@@ -152,21 +154,22 @@ alter table public.conversas
   add column rascunho jsonb;
 alter table public.conversas
   add constraint chk_conversas_estado
-    check (estado in ('identificacao', 'aguardando_confirmacao', 'menu', 'duvidas', 'reserva'));
+    check (estado in ('identificacao', 'aguardando_confirmacao', 'menu', 'duvidas',
+                      'reserva', 'ocorrencia'));
 alter table public.conversas
   add constraint chk_conversas_estado_coerente check (
        (estado = 'identificacao'
           and condominio_id is null and condominio_pendente is null)
     or (estado = 'aguardando_confirmacao'
           and condominio_id is null)
-    or (estado in ('menu', 'duvidas', 'reserva')
+    or (estado in ('menu', 'duvidas', 'reserva', 'ocorrencia')
           and condominio_id is not null and condominio_pendente is null)
   );
 alter table public.conversas
   add constraint chk_conversas_rascunho check (
-       (estado = 'reserva'
+       (estado in ('reserva', 'ocorrencia')
           and rascunho is not null and jsonb_typeof(rascunho) = 'object')
-    or (estado <> 'reserva' and rascunho is null)
+    or (estado not in ('reserva', 'ocorrencia') and rascunho is null)
   );
 
 -- áreas comuns e reservas (baseline 20260701000000) — para as leituras da
@@ -245,3 +248,42 @@ alter table public.reservas
     foreign key (area_id, condominio_id)
     references public.areas_comuns (id, condominio_id)
     on delete cascade;
+
+-- solicitacoes (baseline 20260701000000) + gate de idempotência da ocorrência
+-- (Fase 4 · Etapa 4, 20260728171233). Forma FINAL, como o resto do arquivo.
+-- Sem o trigger de updated_at: a Etapa 4 só INSERE (o UPDATE é da Etapa 6).
+create table public.solicitacoes (
+  id uuid primary key default gen_random_uuid(),
+  condominio_id uuid not null references public.condominios (id) on delete cascade,
+  unidade_id uuid references public.unidades (id) on delete set null,
+  morador_id uuid references public.moradores (id) on delete set null,
+  telefone text,
+  tipo text not null default 'ocorrencia'
+    constraint solicitacoes_tipo_check
+    check (tipo in ('reclamacao', 'ocorrencia', 'manutencao', 'outro')),
+  titulo text,
+  descricao text,
+  anexos jsonb not null default '[]'::jsonb
+    constraint solicitacoes_anexos_check check (jsonb_typeof(anexos) = 'array'),
+  status text not null default 'aberta'
+    constraint solicitacoes_status_check
+    check (status in ('aberta', 'em_andamento', 'resolvida', 'cancelada')),
+  origem_mensagem_id uuid references public.mensagens (id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create unique index uq_solicitacoes_origem_mensagem
+  on public.solicitacoes (origem_mensagem_id)
+  where (origem_mensagem_id is not null);
+create index idx_solicitacoes_condominio_id on public.solicitacoes (condominio_id);
+create index idx_solicitacoes_telefone on public.solicitacoes (telefone);
+
+-- Stub de storage.objects: só as colunas que a faxina consulta. O Supabase cria
+-- essa tabela sozinho; aqui ela existe para a query dos órfãos ser testável.
+create schema storage;
+create table storage.objects (
+  id uuid primary key default gen_random_uuid(),
+  bucket_id text,
+  name text,
+  created_at timestamptz not null default now()
+);

@@ -19,9 +19,10 @@ Uma decisão = UMA mensagem. Não é preferência: uq_mensagens_em_resposta_a é
 único, então o banco só aceita uma resposta por mensagem recebida.
 
 A decisão nomeia a mensagem (Mensagem.MENU), não escreve o texto — a redação é
-do passo 3. E três decisões DELEGAM, porque não podem ser resolvidas sem I/O:
+do passo 3. E quatro decisões DELEGAM, porque não podem ser resolvidas sem I/O:
 qual condomínio é o item N exige a lista (passo 3), responder dúvida exige
-RAG + LLM (passo 6), e a reserva exige áreas, agenda e escrita (Fase 4).
+RAG + LLM (passo 6), a reserva exige áreas e agenda, e a ocorrência exige a
+escrita (e o upload da foto, se houver).
 
 Transicao só nasce pelos construtores nomeados: a trinca ilegal fica
 irrepresentável aqui, do mesmo jeito que chk_conversas_estado_coerente a torna
@@ -48,6 +49,7 @@ class Estado(str, Enum):
     MENU = "menu"
     DUVIDAS = "duvidas"
     RESERVA = "reserva"
+    OCORRENCIA = "ocorrencia"
 
 
 class Mensagem(str, Enum):
@@ -64,6 +66,7 @@ class Mensagem(str, Enum):
     PERGUNTA_VAZIA = "pergunta_vazia"
     SO_ENTENDO_TEXTO = "so_entendo_texto"
     NADA_AGENDADO = "nada_agendado"
+    NADA_REGISTRADO = "nada_registrado"
 
 
 ESCAPE = 0
@@ -88,7 +91,16 @@ class OpcaoMenu(IntEnum):
     TROCAR_CONDOMINIO = 9
 
 
-_INDISPONIVEIS = frozenset({OpcaoMenu.SINDICO, OpcaoMenu.OCORRENCIA})
+_INDISPONIVEIS = frozenset({OpcaoMenu.SINDICO})
+
+# Estados com tenant confirmado — mesmo ramo do chk_conversas_estado_coerente.
+# Fluxo esquecido aqui não reconfirma sessão expirada: escreve no tenant antigo.
+_COM_TENANT = frozenset(
+    {Estado.MENU, Estado.DUVIDAS, Estado.RESERVA, Estado.OCORRENCIA}
+)
+
+# Onde imagem é entrada legítima. Fora daqui segue ouvindo SO_ENTENDO_TEXTO.
+_ACEITAM_IMAGEM = frozenset({Estado.OCORRENCIA})
 
 # Tolera o que as pessoas digitam de verdade: espaço em volta, "1." e "1)"
 # copiados do formato da lista, zero à esquerda. Por extenso não entra — abriria
@@ -141,6 +153,15 @@ class Transicao(BaseModel):
     def para_reserva(cls, condominio: UUID, rascunho: dict[str, Any]) -> Self:
         return cls(
             estado=Estado.RESERVA,
+            condominio_id=condominio,
+            condominio_pendente=None,
+            rascunho=rascunho,
+        )
+
+    @classmethod
+    def para_ocorrencia(cls, condominio: UUID, rascunho: dict[str, Any]) -> Self:
+        return cls(
+            estado=Estado.OCORRENCIA,
             condominio_id=condominio,
             condominio_pendente=None,
             rascunho=rascunho,
@@ -205,7 +226,26 @@ class DelegarReserva(BaseModel):
     escolha: str
 
 
-Decisao = Responder | DelegarIdentificacao | DelegarDuvida | DelegarReserva
+class DelegarOcorrencia(BaseModel):
+    """O morador entrou ou avançou no wizard de ocorrência.
+
+    `tem_foto` é marcador, não bytes: o roteador é puro. Quem carrega a mídia é a
+    casca, que decide o upload.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    texto: str | None
+    tem_foto: bool = False
+
+
+Decisao = (
+    Responder
+    | DelegarIdentificacao
+    | DelegarDuvida
+    | DelegarReserva
+    | DelegarOcorrencia
+)
 
 
 def opcao(texto: str) -> int | None:
@@ -266,14 +306,13 @@ def rotear(
     ):
         return _recomecar_identificacao()
 
-    if tipo is not MessageType.TEXT or texto is None:
+    imagem_aceita = (
+        tipo is MessageType.IMAGE and conversa.estado in _ACEITAM_IMAGEM
+    )
+    if not imagem_aceita and (tipo is not MessageType.TEXT or texto is None):
         return Responder(mensagem=Mensagem.SO_ENTENDO_TEXTO)
 
-    if precisa_reconfirmar and conversa.estado in (
-        Estado.MENU,
-        Estado.DUVIDAS,
-        Estado.RESERVA,
-    ):
+    if precisa_reconfirmar and conversa.estado in _COM_TENANT:
         return _reconfirmar(conversa)
 
     match conversa.estado:
@@ -287,6 +326,8 @@ def rotear(
             return _duvidas(conversa, texto)
         case Estado.RESERVA:
             return _reserva(conversa, texto)
+        case Estado.OCORRENCIA:
+            return _ocorrencia(conversa, tipo, texto)
 
 
 def _identificacao(texto: str) -> Decisao:
@@ -334,8 +375,8 @@ def _confirmacao(conversa: Conversa, texto: str) -> Decisao:
 def _menu(conversa: Conversa, texto: str) -> Decisao:
     """Morador já identificado, escolhendo o que quer fazer.
 
-    O 1 abre dúvidas (a única que chama IA) e o 2 abre a reserva, que é
-    determinística. 3 e 4 respondem "indisponível" sem prometer prazo. O 9 é a
+    O 1 abre dúvidas (a única que chama IA); 2 e 3 abrem os wizards, que são
+    determinísticos. O 4 responde "indisponível" sem prometer prazo. O 9 é a
     saída de quem não é (ou deixou de ser) desse condomínio.
 
     5..8 são reservados e ainda sem dono: caem em MENU_NAO_ENTENDIDO, que fala
@@ -360,6 +401,8 @@ def _menu(conversa: Conversa, texto: str) -> Decisao:
             )
         case OpcaoMenu.RESERVA:
             return DelegarReserva(escolha=texto)
+        case OpcaoMenu.OCORRENCIA:
+            return DelegarOcorrencia(texto=texto)
         case OpcaoMenu.TROCAR_CONDOMINIO:
             return _recomecar_identificacao()
         case _ if escolhido in _INDISPONIVEIS:
@@ -408,6 +451,26 @@ def _reserva(conversa: Conversa, texto: str) -> Decisao:
             transicao=Transicao.para_menu(condominio),
         )
     return DelegarReserva(escolha=texto)
+
+
+def _ocorrencia(conversa: Conversa, tipo: MessageType, texto: str | None) -> Decisao:
+    """Dentro do wizard — e o único estado onde imagem entra.
+
+    Só o 0 é comando, resolvido AQUI: é a saída que precisa funcionar mesmo com o
+    rascunho ilegível. Nada foi gravado em solicitacoes até a confirmação.
+
+    Foto nunca é escape: `texto` dela é legenda, e uma legenda "0" não deve tirar
+    o morador do wizard.
+    """
+    condominio = _condominio_confirmado(conversa)
+    tem_foto = tipo is MessageType.IMAGE
+
+    if not tem_foto and opcao(texto or "") == ESCAPE:
+        return Responder(
+            mensagem=Mensagem.NADA_REGISTRADO,
+            transicao=Transicao.para_menu(condominio),
+        )
+    return DelegarOcorrencia(texto=texto, tem_foto=tem_foto)
 
 
 def _condominio_confirmado(conversa: Conversa) -> UUID:

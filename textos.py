@@ -15,6 +15,13 @@ from enum import Enum
 
 from areas import AreaReservavel
 from condominios import CondominioElegivel
+from ocorrencia import (
+    MAX_DESCRICAO,
+    SEGUIR_SEM_FOTO,
+    Anexo,
+    MensagemOcorrencia,
+    TipoSolicitacao,
+)
 from reserva import VER_MAIS, MensagemReserva, PaginaDias
 from roteador import Mensagem, OpcaoMenu
 
@@ -26,7 +33,13 @@ class MensagemAtendimento(str, Enum):
     REGRA_NAO_ENCONTRADA = "regra_nao_encontrada"
 
 
-Identidade = Mensagem | MensagemAtendimento | MensagemReserva
+Identidade = Mensagem | MensagemAtendimento | MensagemReserva | MensagemOcorrencia
+
+_TIPOS_OCORRENCIA = {
+    TipoSolicitacao.RECLAMACAO: "Reclamação",
+    TipoSolicitacao.OCORRENCIA: "Ocorrência",
+    TipoSolicitacao.MANUTENCAO: "Manutenção",
+}
 
 _ROTULOS = {
     OpcaoMenu.DUVIDAS: "Tirar dúvidas sobre o condomínio",
@@ -44,6 +57,12 @@ _MENU = "Como posso ajudar?\n\n{opcoes}\n\nResponda com o número.".format(
 )
 
 _SIM_NAO = "1 - Sim\n2 - Não"
+
+# Gerada do enum, como o menu: número e destino não podem divergir em silêncio.
+_TELA_TIPOS = "\n".join(
+    f"{posicao} - {rotulo}"
+    for posicao, rotulo in enumerate(_TIPOS_OCORRENCIA.values(), start=1)
+)
 
 # Na reserva o "não" e o escape levam ao mesmo lugar, então a opção diz os dois.
 _SIM_NAO_RESERVA = "1 - Sim\n2 - Não, voltar ao menu"
@@ -86,8 +105,48 @@ _CONSTANTES: dict[Identidade, str] = {
         "Não encontrei essa regra no regimento. Sugiro falar com o síndico."
     ),
     Mensagem.NADA_AGENDADO: f"Ok, não agendei nada.\n\n{_MENU}",
+    Mensagem.NADA_REGISTRADO: f"Ok, não registrei nada.\n\n{_MENU}",
     MensagemReserva.SEM_AREAS: (
         f"Esse condomínio ainda não tem área para reservar por aqui.\n\n{_MENU}"
+    ),
+    MensagemOcorrencia.ESCOLHER_TIPO: (
+        f"O que você quer registrar?\n\n{_TELA_TIPOS}\n\n"
+        f"Responda com o número.\n{_VOLTAR}"
+    ),
+    MensagemOcorrencia.TIPO_NAO_ENTENDIDO: (
+        f"Não tenho essa opção.\n\n{_TELA_TIPOS}\n\n"
+        f"Responda com o número.\n{_VOLTAR}"
+    ),
+    MensagemOcorrencia.PEDIR_DESCRICAO: (
+        "Descreva o que aconteceu.\n\n"
+        f"Se ajudar, pode mandar uma foto junto.\n\n{_VOLTAR}"
+    ),
+    MensagemOcorrencia.DESCRICAO_VAZIA: (
+        f"Não recebi sua descrição. Pode escrever o que aconteceu?\n\n{_VOLTAR}"
+    ),
+    MensagemOcorrencia.DESCRICAO_LONGA: (
+        f"Ficou comprido demais (o limite é {MAX_DESCRICAO} caracteres). "
+        f"Pode resumir?\n\n{_VOLTAR}"
+    ),
+    MensagemOcorrencia.PEDIR_FOTO: (
+        "Quer anexar uma foto?\n\n"
+        f"Mande a foto, ou {SEGUIR_SEM_FOTO} - Seguir sem foto\n\n"
+        f"A foto fica guardada junto do registro.\n{_VOLTAR}"
+    ),
+    MensagemOcorrencia.FOTO_NAO_ENTENDIDA: (
+        "Não entendi.\n\n"
+        f"Mande a foto, ou {SEGUIR_SEM_FOTO} - Seguir sem foto\n\n{_VOLTAR}"
+    ),
+    # Culpa do arquivo: mandar de novo o MESMO não resolve.
+    MensagemOcorrencia.FOTO_RECUSADA: (
+        "Não consegui aceitar essa foto — ela é grande demais ou não é uma "
+        f"imagem.\n\nPode mandar outra, ou {SEGUIR_SEM_FOTO} - Seguir sem foto"
+        f"\n\n{_VOLTAR}"
+    ),
+    # Culpa nossa ou da rede: a MESMA foto de novo tende a funcionar.
+    MensagemOcorrencia.FOTO_FALHOU: (
+        "Não consegui guardar a foto agora.\n\n"
+        f"Pode mandar de novo, ou {SEGUIR_SEM_FOTO} - Seguir sem foto\n\n{_VOLTAR}"
     ),
 }
 
@@ -124,6 +183,16 @@ def _tela_confirmar(area: str, dia: date) -> str:
     return f"Confirmar a reserva?\n\n{area}\n{_longo(dia)}\n\n{_SIM_NAO_RESERVA}"
 
 
+def _resumo_ocorrencia(tipo: TipoSolicitacao, descricao: str,
+                       anexos: Sequence[Anexo]) -> str:
+    """O que a confirmação recita. Sem anexo a linha some — não anunciamos vazio."""
+    linhas = [_TIPOS_OCORRENCIA[tipo], descricao]
+    if anexos:
+        linhas.append(f"({len(anexos)} foto anexada)" if len(anexos) == 1
+                      else f"({len(anexos)} fotos anexadas)")
+    return "\n".join(linhas)
+
+
 def renderizar(
     identidade: Identidade,
     *,
@@ -134,6 +203,9 @@ def renderizar(
     pagina: PaginaDias | None = None,
     dia: date | None = None,
     aviso: MensagemReserva | None = None,
+    tipo: TipoSolicitacao | None = None,
+    descricao: str | None = None,
+    anexos: Sequence[Anexo] = (),
 ) -> str:
     """Traduz a identidade da mensagem no texto que o morador recebe.
 
@@ -178,6 +250,21 @@ def renderizar(
                 "Pronto! Registrei seu pedido:\n\n"
                 f"{_exigir(area, 'o nome da área')}\n{_longo(_exigir(dia, 'a data'))}"
                 f"\n\nEstá pendente de aprovação do síndico.\n\n{_MENU}"
+            )
+        case MensagemOcorrencia.CONFIRMAR:
+            return (
+                "Confirmar o registro?\n\n"
+                f"{_resumo(tipo, descricao, anexos)}\n\n{_SIM_NAO_RESERVA}"
+            )
+        case MensagemOcorrencia.CONFIRMACAO_NAO_ENTENDIDA:
+            return (
+                "Só preciso de 1 ou 2.\n\nConfirmar o registro?\n\n"
+                f"{_resumo(tipo, descricao, anexos)}\n\n{_SIM_NAO_RESERVA}"
+            )
+        case MensagemOcorrencia.REGISTRADA:
+            return (
+                f"Pronto! Registrei:\n\n{_resumo(tipo, descricao, anexos)}"
+                f"\n\n{_MENU}"
             )
         case Mensagem.PEDIR_CONDOMINIO:
             return (
@@ -230,3 +317,10 @@ def _exigir(valor, oque: str):
     if valor is None or (hasattr(valor, "__len__") and not len(valor)):
         raise ValueError(f"mensagem da reserva exige {oque}, e veio vazio")
     return valor
+
+
+def _resumo(tipo, descricao, anexos: Sequence[Anexo]) -> str:
+    """Anexos podem ser vazios legitimamente; tipo e descrição, nunca."""
+    return _resumo_ocorrencia(
+        _exigir(tipo, "o tipo"), _exigir(descricao, "a descrição"), anexos
+    )

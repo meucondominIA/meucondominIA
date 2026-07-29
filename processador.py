@@ -18,8 +18,17 @@ e a exceção sobe do mesmo jeito para o chamador marcar 'falhou'.
 
 import logging
 
-from atendimento import GeracaoPendente, responder
+import anexos
+from anexos import AnexoIndisponivelError, AnexoRecusadoError
+from atendimento import (
+    FotoPendente,
+    GeracaoPendente,
+    foto_falhou,
+    responder,
+    retomar_com_anexo,
+)
 from db import get_pool
+from ocorrencia import MensagemOcorrencia
 from geracao import responder_duvida
 from mensagens import (
     aplicar_transicao,
@@ -53,6 +62,8 @@ async def processar_mensagem(msg: IncomingMessage) -> None:
     match resultado:
         case GeracaoPendente():
             texto, transicao = await _gerar(resultado, msg), None
+        case FotoPendente():
+            texto, transicao = await _guardar_foto(resultado, msg)
         case (texto, transicao):
             pass
 
@@ -75,11 +86,32 @@ async def _decidir(conn, conversa, msg: IncomingMessage, entrada_id, conversa_no
     try:
         return await responder(
             conn, conversa, tipo=msg.message_type, texto=msg.text,
-            entrada_id=entrada_id, conversa_nova=conversa_nova,
+            entrada_id=entrada_id, conversa_nova=conversa_nova, midia=msg.midia,
         )
     except Exception:
         logger.exception("atendimento falhou: message_id=%s", msg.message_id)
         return renderizar(MensagemAtendimento.CONTINGENCIA), None
+
+
+async def _guardar_foto(pendente: FotoPendente, msg: IncomingMessage):
+    """O upload, FORA da conexão. A retomada é síncrona e sem banco — o motor da
+    ocorrência não lê nada —, então ela cabe aqui sem reabrir janela.
+
+    As duas falhas do Storage viram telas diferentes de propósito: recusa do
+    arquivo pede OUTRA foto, indisponibilidade pede a MESMA de novo.
+    """
+    try:
+        anexo = await anexos.guardar(
+            pendente.midia, condominio_id=pendente.condominio_id
+        )
+    except AnexoRecusadoError:
+        logger.warning("anexo recusado: message_id=%s", msg.message_id, exc_info=True)
+        return foto_falhou(pendente, MensagemOcorrencia.FOTO_RECUSADA)
+    except AnexoIndisponivelError:
+        logger.exception("anexo indisponível: message_id=%s", msg.message_id)
+        return foto_falhou(pendente, MensagemOcorrencia.FOTO_FALHOU)
+
+    return retomar_com_anexo(pendente, anexo)
 
 
 async def _gerar(pendente: GeracaoPendente, msg: IncomingMessage) -> str:

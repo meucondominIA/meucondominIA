@@ -54,5 +54,29 @@ class Settings(BaseSettings):
 
     reserva_janela_dias: int = 14
 
+    # Storage dos anexos da ocorrência. A chave é SECRETA (ignora RLS); o bucket
+    # é privado, então não há caminho anônimo de escrita nem de leitura.
+    supabase_url: str
+    supabase_secret_key: str
+    anexos_bucket: str = "anexos"
+    # Espelha o file_size_limit do bucket: recusar aqui evita subir para ouvir não.
+    anexo_max_bytes: int = 5_242_880
+    # MEDIDO 28/07/2026 (n=135, Supabase real): foto de WhatsApp p95 0,24s / max
+    # 0,30s; 5 MB (teto) max 0,56s. Sem cauda — o Storage é PUT na mesma região,
+    # não geração. 10s é 18x o pior caso e é o MESMO par do zpro_client, que já
+    # está no caminho de espera do morador.
+    storage_timeout_seconds: float = 10.0
+    storage_connect_timeout_seconds: float = 5.0
+
+    # Varredura de anexos órfãos. A carência precisa ser MAIOR que sessao_ttl_horas:
+    # passado o TTL a conversa encerra e o rascunho some, então nenhum wizard vivo
+    # pode estar segurando o arquivo. 2h sobre TTL de 1h = o dobro de folga, e a
+    # checagem do rascunho na query já protege o wizard em andamento.
+    anexo_orfao_horas: int = 2
+    # Metade da carência: garante que um órfão seja varrido logo depois de
+    # vencê-la, em vez de esperar o ciclo seguinte.
+    faxina_interval_seconds: int = 1800
+    faxina_batch_size: int = 100
+
 
 settings = Settings()

@@ -17,6 +17,7 @@ from roteador import (
     Conversa,
     DelegarDuvida,
     DelegarIdentificacao,
+    DelegarOcorrencia,
     DelegarReserva,
     Estado,
     Mensagem,
@@ -52,6 +53,11 @@ def _texto(conversa: Conversa, texto: str, *, precisa_reconfirmar: bool = False)
         texto=texto,
         precisa_reconfirmar=precisa_reconfirmar,
     )
+
+
+def _foto(conversa: Conversa, texto: str | None = None):
+    """Foto do Z-PRO: `texto` é a legenda, e ela pode não existir."""
+    return rotear(conversa, tipo=MessageType.IMAGE, texto=texto)
 
 
 def _audio(conversa: Conversa, *, precisa_reconfirmar: bool = False):
@@ -143,7 +149,7 @@ def test_menu_opcao_1_abre_duvidas():
     )
 
 
-@pytest.mark.parametrize("texto", ["3", "4"])
+@pytest.mark.parametrize("texto", ["4"])
 def test_menu_opcoes_nao_implementadas(texto):
     assert _texto(MENU, texto) == Responder(mensagem=Mensagem.OPCAO_INDISPONIVEL)
 
@@ -151,6 +157,11 @@ def test_menu_opcoes_nao_implementadas(texto):
 def test_menu_opcao_2_abre_a_reserva():
     """Deixou de ser muro: o ramo 2 delega ao motor, como o 1 delega à geração."""
     assert _texto(MENU, "2") == DelegarReserva(escolha="2")
+
+
+def test_menu_opcao_3_abre_a_ocorrencia():
+    """O ramo 3 deixou de responder 'indisponível' e passou a delegar."""
+    assert _texto(MENU, "3") == DelegarOcorrencia(texto="3", tem_foto=False)
 
 
 def test_menu_trocar_condominio_zera_o_tenant():
@@ -285,6 +296,87 @@ def test_reserva_audio():
     assert _audio(RESERVA) == Responder(mensagem=Mensagem.SO_ENTENDO_TEXTO)
 
 
+# ── ocorrência (Fase 4 · Etapa 4) ────────────────────────────────────────────
+
+OCORRENCIA = _conversa(
+    Estado.OCORRENCIA, condominio=CONDOMINIO, rascunho={"passo": "tipo"}
+)
+
+
+def test_ocorrencia_escape_volta_ao_menu_sem_registrar():
+    decisao = _texto(OCORRENCIA, "0")
+    assert decisao == Responder(
+        mensagem=Mensagem.NADA_REGISTRADO, transicao=Transicao.para_menu(CONDOMINIO)
+    )
+    assert decisao.transicao.rascunho is None
+
+
+@pytest.mark.parametrize("texto", ["1", "9", "99", "abc", "   ", "vazou tudo"])
+def test_ocorrencia_tudo_que_nao_e_escape_delega(texto):
+    """O roteador trata `ocorrencia` como opaca: quem lê o passo é o motor."""
+    assert _texto(OCORRENCIA, texto) == DelegarOcorrencia(texto=texto, tem_foto=False)
+
+
+def test_ocorrencia_nao_olha_o_passo():
+    for passo in ("tipo", "descricao", "foto", "confirmacao"):
+        conversa = _conversa(
+            Estado.OCORRENCIA, condominio=CONDOMINIO, rascunho={"passo": passo}
+        )
+        assert _texto(conversa, "1") == DelegarOcorrencia(texto="1", tem_foto=False)
+
+
+def test_ocorrencia_aceita_foto_sem_legenda():
+    """A guarda global de tipo cede AQUI, e só aqui: foto sem texto é entrada
+    legítima, não 'só entendo texto'."""
+    assert _foto(OCORRENCIA) == DelegarOcorrencia(texto=None, tem_foto=True)
+
+
+def test_ocorrencia_aceita_foto_com_legenda():
+    assert _foto(OCORRENCIA, "vazamento na garagem") == DelegarOcorrencia(
+        texto="vazamento na garagem", tem_foto=True
+    )
+
+
+def test_legenda_zero_nao_e_escape():
+    """Escape é comando digitado. Legenda "0" numa foto não pode tirar o morador
+    do wizard — ele mandou uma foto, não pediu para sair."""
+    assert _foto(OCORRENCIA, "0") == DelegarOcorrencia(texto="0", tem_foto=True)
+
+
+@pytest.mark.parametrize("conversa", [MENU, DUVIDAS, RESERVA, IDENTIFICACAO])
+def test_foto_fora_da_ocorrencia_segue_barrada(conversa):
+    """_ACEITAM_IMAGEM é uma lista de um: alargar a guarda não pode ter alargado
+    para todo mundo."""
+    assert _foto(conversa, "legenda") == Responder(
+        mensagem=Mensagem.SO_ENTENDO_TEXTO
+    )
+
+
+def test_ocorrencia_audio_segue_barrado():
+    """Aceitar imagem não é aceitar mídia: áudio continua fora."""
+    assert _audio(OCORRENCIA) == Responder(mensagem=Mensagem.SO_ENTENDO_TEXTO)
+
+
+def test_ocorrencia_com_sessao_expirada_reconfirma_antes_de_gravar():
+    """Ocorrência é ESCRITA, como a reserva: gravar no tenant não reconfirmado
+    abre a solicitação no condomínio errado."""
+    decisao = _texto(OCORRENCIA, "1", precisa_reconfirmar=True)
+    assert decisao == Responder(
+        mensagem=Mensagem.RECONFIRMAR_CONDOMINIO,
+        transicao=Transicao.para_confirmacao(CONDOMINIO),
+    )
+    assert decisao.transicao.rascunho is None
+
+
+def test_foto_com_sessao_expirada_reconfirma():
+    """A reconfirmação vem DEPOIS do filtro de tipo: a foto atravessa o filtro e
+    é reconfirmada, em vez de virar 'só entendo texto'."""
+    decisao = rotear(
+        OCORRENCIA, tipo=MessageType.IMAGE, texto=None, precisa_reconfirmar=True
+    )
+    assert decisao.mensagem is Mensagem.RECONFIRMAR_CONDOMINIO
+
+
 def test_duvidas_nao_muda_de_estado_ao_perguntar():
     assert isinstance(_texto(DUVIDAS, "Posso ter cachorro?"), DelegarDuvida)
 
@@ -322,6 +414,7 @@ def test_estados_do_python_batem_com_o_check_do_banco():
         Transicao.para_menu(CONDOMINIO),
         Transicao.para_duvidas(CONDOMINIO),
         Transicao.para_reserva(CONDOMINIO, {"passo": "area"}),
+        Transicao.para_ocorrencia(CONDOMINIO, {"passo": "tipo"}),
     ],
 )
 def test_construtores_produzem_destino_coerente(transicao):
@@ -333,11 +426,11 @@ def test_construtores_produzem_destino_coerente(transicao):
             assert transicao.condominio_pendente is None
         case Estado.AGUARDANDO_CONFIRMACAO:
             assert transicao.condominio_id is None
-        case Estado.MENU | Estado.DUVIDAS | Estado.RESERVA:
+        case Estado.MENU | Estado.DUVIDAS | Estado.RESERVA | Estado.OCORRENCIA:
             assert transicao.condominio_id is not None
             assert transicao.condominio_pendente is None
 
-    if transicao.estado is Estado.RESERVA:
+    if transicao.estado in (Estado.RESERVA, Estado.OCORRENCIA):
         assert isinstance(transicao.rascunho, dict)
     else:
         assert transicao.rascunho is None
@@ -359,12 +452,13 @@ def test_toda_mensagem_declarada_e_alcancavel():
         MENU,
         DUVIDAS,
         RESERVA,
+        OCORRENCIA,
     ]
     emitidas = set()
     for conversa in conversas:
         emitidas.add(_audio(conversa).mensagem)
         for reconfirmar in (False, True):
-            for texto in ("1", "2", "3", "5", "0", "9", "oi", "   "):
+            for texto in ("1", "2", "3", "4", "5", "0", "9", "oi", "   "):
                 decisao = _texto(conversa, texto, precisa_reconfirmar=reconfirmar)
                 if isinstance(decisao, Responder):
                     emitidas.add(decisao.mensagem)
