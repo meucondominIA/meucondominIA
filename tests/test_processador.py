@@ -97,7 +97,8 @@ class _FakeConn:
 
     async def fetchval(self, query, *args):
         self.calls.append(("fetchval", query, args))
-        return False
+        # O lookup do síndico devolve UUID ou None; o resto (exists) devolve bool.
+        return None if "sindico_telefone" in query else False
 
     async def fetch(self, query, *args):
         self.calls.append(("fetch", query, args))
@@ -135,6 +136,7 @@ def deps(monkeypatch):
     conn = _FakeConn()
     mocks = SimpleNamespace(
         conn=conn,
+        sindico=AsyncMock(return_value=None),
         upsert=AsyncMock(return_value=(CONVERSA, False)),
         entrada=AsyncMock(return_value=(ENTRADA_ID, True)),
         ja_existe=AsyncMock(return_value=False),
@@ -146,6 +148,7 @@ def deps(monkeypatch):
         enviar=AsyncMock(),
     )
     monkeypatch.setattr(processador, "get_pool", lambda: _FakePool(conn))
+    monkeypatch.setattr(processador, "condominio_do_sindico", mocks.sindico)
     monkeypatch.setattr(processador, "conversa_ativa", mocks.upsert)
     monkeypatch.setattr(processador, "registrar_entrada", mocks.entrada)
     monkeypatch.setattr(processador, "saida_ja_existe", mocks.ja_existe)
@@ -425,3 +428,54 @@ def test_falha_no_upload_regrava_o_mesmo_rascunho(deps, monkeypatch):
     transicao = deps.transicao.await_args.args[2]
     assert transicao.estado is Estado.OCORRENCIA
     assert transicao.rascunho["descricao"] == "vazou"
+
+
+# ── reconhecimento do síndico na borda (Fase 4 · Etapa 5) ────────────────────
+
+
+def test_sindico_nao_entra_no_fluxo_de_morador(deps):
+    """Sem isto o "1" dele viraria escolha de condomínio da lista."""
+    deps.sindico.return_value = CONDOMINIO_ID
+
+    asyncio.run(processador.processar_mensagem(_msg("1")))
+
+    deps.upsert.assert_not_awaited()
+    deps.entrada.assert_not_awaited()
+    deps.responder.assert_not_awaited()
+    deps.saida.assert_not_awaited()
+
+
+def test_sindico_recebe_o_texto_fixo(deps):
+    from textos import MensagemSindico
+
+    deps.sindico.return_value = CONDOMINIO_ID
+
+    asyncio.run(processador.processar_mensagem(_msg("ok")))
+
+    out = deps.enviar.await_args.args[0]
+    assert out.phone == "555592372732"
+    assert out.text == renderizar(MensagemSindico.SEM_CANAL)
+    assert out.external_key == "MSG-1"
+
+
+def test_morador_segue_intacto(deps):
+    """O lookup roda para todo mundo, mas só desvia quem é síndico."""
+    asyncio.run(processador.processar_mensagem(_msg("Oi")))
+
+    deps.sindico.assert_awaited_once_with(deps.conn, "555592372732")
+    deps.upsert.assert_awaited_once()
+    assert deps.enviar.await_args.args[0].text == RESPOSTA
+
+
+def test_envio_ao_sindico_com_a_conexao_devolvida(deps):
+    """A regra de ouro vale também no ramo curto."""
+    deps.sindico.return_value = CONDOMINIO_ID
+    visto = {}
+
+    async def enviar(msg):
+        visto["em_uso"] = processador.get_pool().em_uso
+
+    deps.enviar.side_effect = enviar
+    asyncio.run(processador.processar_mensagem(_msg("ok")))
+
+    assert visto["em_uso"] is False

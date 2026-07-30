@@ -119,12 +119,20 @@ class _Ambiente:
         async with self.pool.acquire() as conn:
             return await conn.fetch(
                 """
-                select s.tipo, s.status, s.descricao, s.telefone, s.anexos,
+                select s.id, s.tipo, s.status, s.descricao, s.telefone, s.anexos,
                        s.morador_id, s.unidade_id, s.origem_mensagem_id, c.slug
                   from solicitacoes s
                   join condominios c on c.id = s.condominio_id
                  order by s.created_at
                 """
+            )
+
+    async def avisos(self) -> list[asyncpg.Record]:
+        async with self.pool.acquire() as conn:
+            return await conn.fetch(
+                "select a.status, a.texto, a.solicitacao_id, c.sindico_telefone "
+                "from avisos_sindico a "
+                "join condominios c on c.id = a.condominio_id order by a.created_at"
             )
 
     async def respostas_por_entrada(self) -> list[int]:
@@ -234,6 +242,15 @@ def test_marco_ocorrencia_so_texto(ambiente):
         assert s["descricao"] == "Vazamento no 3º andar 💧\nDesde ontem."
         assert s["anexos"] == []
         assert s["morador_id"] is None and s["unidade_id"] is None
+
+        # o aviso ao síndico nasceu na MESMA transação da solicitação (Etapa 5)
+        (aviso,) = await a.avisos()
+        assert aviso["solicitacao_id"] == s["id"]
+        assert aviso["status"] == "pendente"
+        assert aviso["texto"].startswith(f"Ocorrência #{s['id'].hex[:8]}")
+        assert "Vazamento no 3º andar" in aviso["texto"]
+        assert NUMERO in aviso["texto"]
+        assert "Aprovar" not in aviso["texto"]
 
         assert (await a.conversa())["estado"] == "menu"
         assert (await a.conversa())["rascunho"] is None

@@ -43,38 +43,29 @@ class Settings(BaseSettings):
     sweeper_grace_seconds: int = 300
     sweeper_batch_size: int = 20
 
-    # Espelha o "Resolver atendimento sem interação" do painel do Z-PRO, que manda
-    # a despedida ao morador. Os dois números têm que andar juntos: se o nosso for
-    # mais lento, o morador lê "atendimento encerrado" e o bot segue como se nada.
+    # Espelha o "Resolver atendimento sem interação" do painel do Z-PRO: se o
+    # nosso for mais lento, o morador lê "encerrado" e o bot segue como se nada.
     sessao_ttl_horas: int = 1
-    # Só a CADÊNCIA da varredura; o corte é o sessao_ttl_horas acima. Atraso aqui
-    # não muda o que o morador vê — o comportamento sai de _sessao_expirada, que
-    # compara o relógio na hora da mensagem. Isto só arruma a contabilidade.
     encerrador_interval_seconds: int = 600
 
     reserva_janela_dias: int = 14
 
-    # Storage dos anexos da ocorrência. A chave é SECRETA (ignora RLS); o bucket
-    # é privado, então não há caminho anônimo de escrita nem de leitura.
+    # A lease tem que caber o lote: batch × latência < lease. Medido 29/07/2026,
+    # ~1,1s por envio — 20 × 1,1s ≈ 22s contra 60s. Estourar duplica por rotina.
+    aviso_interval_seconds: int = 30
+    aviso_batch_size: int = 20
+    aviso_lease_seconds: int = 60
+
     supabase_url: str
-    supabase_secret_key: str
+    supabase_secret_key: str  # chave SECRETA: ignora RLS, só no servidor
     anexos_bucket: str = "anexos"
-    # Espelha o file_size_limit do bucket: recusar aqui evita subir para ouvir não.
-    anexo_max_bytes: int = 5_242_880
-    # MEDIDO 28/07/2026 (n=135, Supabase real): foto de WhatsApp p95 0,24s / max
-    # 0,30s; 5 MB (teto) max 0,56s. Sem cauda — o Storage é PUT na mesma região,
-    # não geração. 10s é 18x o pior caso e é o MESMO par do zpro_client, que já
-    # está no caminho de espera do morador.
+    anexo_max_bytes: int = 5_242_880  # espelha o file_size_limit do bucket
     storage_timeout_seconds: float = 10.0
     storage_connect_timeout_seconds: float = 5.0
 
-    # Varredura de anexos órfãos. A carência precisa ser MAIOR que sessao_ttl_horas:
-    # passado o TTL a conversa encerra e o rascunho some, então nenhum wizard vivo
-    # pode estar segurando o arquivo. 2h sobre TTL de 1h = o dobro de folga, e a
-    # checagem do rascunho na query já protege o wizard em andamento.
+    # Precisa ser MAIOR que sessao_ttl_horas: só depois do TTL a conversa encerra
+    # e o rascunho some, garantindo que nenhum wizard vivo segura o arquivo.
     anexo_orfao_horas: int = 2
-    # Metade da carência: garante que um órfão seja varrido logo depois de
-    # vencê-la, em vez de esperar o ciclo seguinte.
     faxina_interval_seconds: int = 1800
     faxina_batch_size: int = 100
 

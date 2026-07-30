@@ -31,8 +31,18 @@ create table public.condominios (
   nome text,
   ativo boolean not null default true,
   -- fiel à baseline: é ela que traduz "dia 25" em instantes (timezone_por_id).
-  timezone text not null default 'America/Sao_Paulo'
+  timezone text not null default 'America/Sao_Paulo',
+  -- fonte do síndico (Fase 4 · Etapa 5, 20260730093504). Mesmo CHECK de
+  -- moradores.telefone: casa com normalize_phone, que só mantém dígitos.
+  sindico_telefone text
+    constraint chk_condominios_sindico_telefone
+      check (sindico_telefone is null or sindico_telefone ~ '^[0-9]{10,15}$')
 );
+-- Parcial: é ele que torna o lookup reverso da borda (telefone → condomínio)
+-- single-valued, deixando "mesmo número em 2 condomínios" ingravável.
+create unique index uq_condominios_sindico_telefone
+  on public.condominios (sindico_telefone)
+  where (sindico_telefone is not null);
 create table public.moradores (id uuid primary key default gen_random_uuid());
 
 create or replace function public.set_updated_at()
@@ -277,6 +287,33 @@ create unique index uq_solicitacoes_origem_mensagem
   where (origem_mensagem_id is not null);
 create index idx_solicitacoes_condominio_id on public.solicitacoes (condominio_id);
 create index idx_solicitacoes_telefone on public.solicitacoes (telefone);
+
+-- avisos_sindico: o outbox da mensagem proativa (Fase 4 · Etapa 5,
+-- 20260730093504). Depois de reservas e solicitacoes — as duas FKs discriminadas
+-- apontam para elas. RLS fica fora, como no resto deste arquivo.
+create table public.avisos_sindico (
+  id uuid primary key default gen_random_uuid(),
+  condominio_id uuid not null references public.condominios (id) on delete cascade,
+  reserva_id uuid references public.reservas (id) on delete cascade,
+  solicitacao_id uuid references public.solicitacoes (id) on delete cascade,
+  texto text not null,
+  status text not null default 'pendente'
+    constraint chk_avisos_sindico_status check (status in ('pendente', 'enviado')),
+  tentativas integer not null default 0,
+  reservado_ate timestamptz,
+  enviado_em timestamptz,
+  created_at timestamptz not null default now(),
+  constraint chk_avisos_sindico_um_pedido check (
+    (reserva_id is not null and solicitacao_id is null)
+    or (reserva_id is null and solicitacao_id is not null)
+  )
+);
+create unique index uq_avisos_sindico_reserva
+  on public.avisos_sindico (reserva_id) where (reserva_id is not null);
+create unique index uq_avisos_sindico_solicitacao
+  on public.avisos_sindico (solicitacao_id) where (solicitacao_id is not null);
+create index idx_avisos_sindico_pendentes
+  on public.avisos_sindico (created_at) where (status = 'pendente');
 
 -- Stub de storage.objects: só as colunas que a faxina consulta. O Supabase cria
 -- essa tabela sozinho; aqui ela existe para a query dos órfãos ser testável.

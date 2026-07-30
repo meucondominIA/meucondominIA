@@ -98,7 +98,7 @@ class _Ambiente:
         async with self.pool.acquire() as conn:
             return await conn.fetch(
                 """
-                select r.status, r.telefone, r.origem_mensagem_id,
+                select r.id, r.status, r.telefone, r.origem_mensagem_id,
                        c.slug, a.nome as area,
                        r.inicio at time zone c.timezone as inicio_civil,
                        r.fim    at time zone c.timezone as fim_civil
@@ -107,6 +107,14 @@ class _Ambiente:
                   join areas_comuns a on a.id = r.area_id
                  order by r.created_at
                 """
+            )
+
+    async def avisos(self) -> list[asyncpg.Record]:
+        async with self.pool.acquire() as conn:
+            return await conn.fetch(
+                "select a.status, a.texto, a.reserva_id, c.sindico_telefone "
+                "from avisos_sindico a "
+                "join condominios c on c.id = a.condominio_id order by a.created_at"
             )
 
     async def respostas_por_entrada(self) -> list[int]:
@@ -225,6 +233,16 @@ def test_reserva_ponta_a_ponta_cai_como_pendente(ambiente):
         dia = date.fromisoformat(escolhido)
         assert str(reserva["inicio_civil"]) == f"{dia} 00:00:00"
         assert str(reserva["fim_civil"]) == f"{dia + timedelta(days=1)} 00:00:00"
+
+        # o aviso ao síndico nasceu na MESMA transação do pedido (Etapa 5)
+        (aviso,) = await a.avisos()
+        assert aviso["reserva_id"] == reserva["id"]
+        assert aviso["status"] == "pendente"
+        assert aviso["texto"].startswith(f"Reserva #{reserva['id'].hex[:8]}")
+        assert "Salão de Festas" in aviso["texto"]
+        assert NUMERO in aviso["texto"]
+        # D5: informativo, sem máquina de aprovação por WhatsApp
+        assert "Aprovar" not in aviso["texto"]
 
         # nenhuma resposta duplicada
         assert set(await a.respostas_por_entrada()) == {1}

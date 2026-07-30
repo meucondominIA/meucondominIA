@@ -15,7 +15,7 @@ from condominios import CondominioElegivel
 from ocorrencia import Anexo, MensagemOcorrencia, TipoSolicitacao
 from reserva import MensagemReserva, montar_pagina
 from roteador import Mensagem, OpcaoMenu
-from textos import MensagemAtendimento, renderizar
+from textos import MensagemAtendimento, MensagemSindico, renderizar
 
 LISTA = [
     CondominioElegivel(id=uuid4(), nome="Edifício Alfa"),
@@ -198,3 +198,104 @@ def test_lista_vazia_levanta_e_nao_gera_menu_quebrado(identidade):
 def test_nome_faltando_levanta(identidade):
     with pytest.raises(ValueError, match="nome do condomínio"):
         renderizar(identidade, nome_condominio=None)
+
+
+# ── avisos ao síndico (Fase 4 · Etapa 5) ─────────────────────────────────────
+
+_ANEXO = Anexo(
+    bucket="anexos", caminho="c/x.jpg", mimetype="image/jpeg", bytes=1, sha256="a"
+)
+
+
+def test_aviso_de_reserva_cita_tudo_que_o_sindico_precisa():
+    texto = renderizar(
+        MensagemSindico.AVISO_RESERVA,
+        identificador="3f9a2b1c",
+        area="Salão de Festas",
+        dia=date(2026, 8, 8),
+        telefone_morador="5555992372732",
+    )
+    assert texto.startswith("Reserva #3f9a2b1c")
+    assert "Salão de Festas" in texto
+    assert "sábado, 08/08" in texto
+    assert "5555992372732" in texto
+
+
+def test_aviso_de_ocorrencia_reusa_o_resumo_do_morador():
+    texto = renderizar(
+        MensagemSindico.AVISO_OCORRENCIA,
+        identificador="7b2e1a04",
+        tipo=TipoSolicitacao.MANUTENCAO,
+        descricao="Vazamento no 3º andar",
+        anexos=[_ANEXO],
+        telefone_morador="5555992372732",
+    )
+    assert texto.startswith("Ocorrência #7b2e1a04")
+    assert "Manutenção" in texto
+    assert "Vazamento no 3º andar" in texto
+    assert "(1 foto anexada)" in texto
+    assert "5555992372732" in texto
+
+
+@pytest.mark.parametrize(
+    "identidade, extra",
+    [
+        (
+            MensagemSindico.AVISO_RESERVA,
+            {"area": "Salão", "dia": date(2026, 8, 8)},
+        ),
+        (
+            MensagemSindico.AVISO_OCORRENCIA,
+            {"tipo": TipoSolicitacao.MANUTENCAO, "descricao": "x"},
+        ),
+    ],
+)
+def test_d5_o_aviso_nao_oferece_aprovacao_por_whatsapp(identidade, extra):
+    """A aprovação é no portal (D5 = Plano 1). Regressão de produto vira teste."""
+    texto = renderizar(
+        identidade, identificador="abc12345", telefone_morador="5511", **extra
+    )
+    for proibido in ("Aprovar", "Recusar", "Responda com o número", "1 - "):
+        assert proibido not in texto
+
+
+@pytest.mark.parametrize(
+    "identidade, extra",
+    [
+        (
+            MensagemSindico.AVISO_RESERVA,
+            {"area": "Salão", "dia": date(2026, 8, 8)},
+        ),
+        (
+            MensagemSindico.AVISO_OCORRENCIA,
+            {"tipo": TipoSolicitacao.MANUTENCAO, "descricao": "x"},
+        ),
+    ],
+)
+def test_aviso_sem_identificador_levanta(identidade, extra):
+    """Sem identificador o síndico não consegue casar o aviso com o pedido."""
+    with pytest.raises(ValueError, match="identificador"):
+        renderizar(identidade, telefone_morador="5511", **extra)
+
+
+def test_texto_da_borda_nao_promete_portal():
+    """O painel só existe na Fase 5 — prometer aqui seria mentira ao síndico."""
+    texto = renderizar(MensagemSindico.SEM_CANAL)
+    assert "síndico" in texto
+    assert "painel" not in texto.lower()
+
+
+@pytest.mark.parametrize(
+    "identidade, extra",
+    [
+        (MensagemReserva.RESERVA_REGISTRADA, {"area": "Salão", "dia": date(2026, 8, 8)}),
+        (
+            MensagemOcorrencia.REGISTRADA,
+            {"tipo": TipoSolicitacao.MANUTENCAO, "descricao": "vazou"},
+        ),
+    ],
+)
+def test_lgpd_o_morador_e_avisado_de_que_o_numero_vai_ao_sindico(identidade, extra):
+    """Base legal é procedimento a pedido do titular: exige transparência."""
+    texto = renderizar(identidade, **extra)
+    assert "O síndico recebe seu número e este pedido." in texto

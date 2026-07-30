@@ -67,6 +67,20 @@ async def nome_por_id(conn: asyncpg.Connection, condominio_id: UUID) -> str | No
     )
 
 
+async def condominio_do_sindico(
+    conn: asyncpg.Connection, telefone: str
+) -> UUID | None:
+    """O condomínio de quem é síndico por este número, ou None.
+
+    fetchval basta: uq_condominios_sindico_telefone é único. Sem filtro de
+    `ativo` — tenant desativado ainda tem síndico, e não reconhecê-lo o jogaria
+    no fluxo de morador.
+    """
+    return await conn.fetchval(
+        "select id from condominios where sindico_telefone = $1", telefone
+    )
+
+
 async def timezone_por_id(conn: asyncpg.Connection, condominio_id: UUID) -> str:
     """O fuso civil do condomínio — o que traduz "dia 25" em instantes.
 

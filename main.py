@@ -32,6 +32,7 @@ from fastapi import FastAPI
 import anexos
 import chat
 import embeddings
+from avisador import rodar_avisador
 from db import criar_pool, fechar_pool
 from encerrador import rodar_encerrador
 from faxina import rodar_faxina
@@ -74,6 +75,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
         faxina = asyncio.create_task(rodar_faxina(), name="faxina")
         recursos.push_async_callback(_cancelar, faxina)
+
+        avisador = asyncio.create_task(rodar_avisador(), name="avisador")
+        recursos.push_async_callback(_cancelar, avisador)
 
         yield
 

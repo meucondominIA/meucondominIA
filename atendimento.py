@@ -9,6 +9,10 @@ adiada que o processador dispara depois de devolver a conexão ao pool.
 Regra de ouro: só banco, nenhuma rede. Envio, geração e gravação da saída são
 do processador, fora de qualquer conexão presa.
 
+Os dois pontos de escrita abrem transação PRÓPRIA (Fase 4 · Etapa 5): sem ela o
+INSERT do pedido roda em autocommit e o aviso ao síndico poderia nascer sem o
+pedido, ou o pedido sem o aviso.
+
 A invariante do isolamento mora aqui: o índice N é resolvido sobre a lista
 DEVOLVIDA por listar_elegiveis, nunca por uma segunda consulta com OFFSET.
 """
@@ -24,6 +28,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 import ocorrencia
 import reserva
 from areas import AreaReservavel, listar_areas_reservaveis
+from avisos import enfileirar_aviso_ocorrencia, enfileirar_aviso_reserva
 from condominios import (
     CondominioElegivel,
     listar_elegiveis,
@@ -48,7 +53,7 @@ from roteador import (
     rotear,
 )
 from solicitacoes import criar_solicitacao
-from textos import MensagemAtendimento, renderizar
+from textos import MensagemAtendimento, MensagemSindico, renderizar
 from zpro_models import MessageType, MidiaRecebida
 
 logger = logging.getLogger(__name__)
@@ -360,17 +365,36 @@ async def _gravar(
     None não é erro: é a corrida real (o dia saiu de baixo entre a tela e o "1").
     Volta para a lista atualizada, na página onde o morador estava. Quem decide
     quem venceu é o banco, como a Etapa 2 desenhou.
+
+    A transação amarra o pedido ao aviso. Dia tomado não enfileira: não há pedido
+    a avisar.
     """
     tz = await timezone_por_id(conn, conversa.condominio_id)
-    reserva_id = await criar_reserva_pendente(
-        conn,
-        condominio_id=conversa.condominio_id,
-        area_id=pedido.area_id,
-        dia=pedido.dia,
-        tz=tz,
-        telefone=conversa.telefone,
-        origem_mensagem_id=entrada_id,
-    )
+    nome = _nome_area(areas, pedido.area_id)
+
+    async with conn.transaction():
+        reserva_id = await criar_reserva_pendente(
+            conn,
+            condominio_id=conversa.condominio_id,
+            area_id=pedido.area_id,
+            dia=pedido.dia,
+            tz=tz,
+            telefone=conversa.telefone,
+            origem_mensagem_id=entrada_id,
+        )
+        if reserva_id is not None:
+            await enfileirar_aviso_reserva(
+                conn,
+                condominio_id=conversa.condominio_id,
+                reserva_id=reserva_id,
+                texto=renderizar(
+                    MensagemSindico.AVISO_RESERVA,
+                    identificador=_identificador(reserva_id),
+                    area=nome,
+                    dia=pedido.dia,
+                    telefone_morador=conversa.telefone,
+                ),
+            )
 
     if reserva_id is None:
         return await _dias(
@@ -386,13 +410,15 @@ async def _gravar(
 
     logger.info("reserva pendente: id=%s conversa=%s", reserva_id, conversa.id)
     return (
-        renderizar(
-            MensagemReserva.RESERVA_REGISTRADA,
-            area=_nome_area(areas, pedido.area_id),
-            dia=pedido.dia,
-        ),
+        renderizar(MensagemReserva.RESERVA_REGISTRADA, area=nome, dia=pedido.dia),
         Transicao.para_menu(conversa.condominio_id),
     )
+
+
+def _identificador(pedido_id: UUID) -> str:
+    """O que o síndico lê e cita. Curto porque ele nunca digita: a aprovação é no
+    portal, que correlaciona pelo uuid inteiro."""
+    return pedido_id.hex[:8]
 
 
 # ── wizard de ocorrência (Fase 4 · Etapa 4) ──────────────────────────────────
@@ -496,16 +522,33 @@ async def _abrir_solicitacao(
     entrada_id: UUID,
 ) -> tuple[str, Transicao]:
     """O único ponto de escrita do fluxo. Sem ramo de "não deu": a ocorrência não
-    tem disponibilidade a disputar, e o tipo de criar_solicitacao diz isso."""
-    solicitacao_id = await criar_solicitacao(
-        conn,
-        condominio_id=conversa.condominio_id,
-        tipo=pedido.tipo,
-        descricao=pedido.descricao,
-        anexos=pedido.anexos,
-        telefone=conversa.telefone,
-        origem_mensagem_id=entrada_id,
-    )
+    tem disponibilidade a disputar, e o tipo de criar_solicitacao diz isso.
+
+    Mesma transação da reserva, sem o `if`: aqui sempre há pedido a avisar.
+    """
+    async with conn.transaction():
+        solicitacao_id = await criar_solicitacao(
+            conn,
+            condominio_id=conversa.condominio_id,
+            tipo=pedido.tipo,
+            descricao=pedido.descricao,
+            anexos=pedido.anexos,
+            telefone=conversa.telefone,
+            origem_mensagem_id=entrada_id,
+        )
+        await enfileirar_aviso_ocorrencia(
+            conn,
+            condominio_id=conversa.condominio_id,
+            solicitacao_id=solicitacao_id,
+            texto=renderizar(
+                MensagemSindico.AVISO_OCORRENCIA,
+                identificador=_identificador(solicitacao_id),
+                tipo=pedido.tipo,
+                descricao=pedido.descricao,
+                anexos=pedido.anexos,
+                telefone_morador=conversa.telefone,
+            ),
+        )
     logger.info("solicitação aberta: id=%s conversa=%s", solicitacao_id, conversa.id)
     return (
         renderizar(

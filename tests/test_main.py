@@ -44,14 +44,18 @@ def _instrumentar(monkeypatch, log, *, criar_falha=None, fechar_falha=None):
     monkeypatch.setattr(anexos, "criar_cliente", _criar("anexos"))
     monkeypatch.setattr(anexos, "fechar_cliente", _fechar("anexos"))
 
-    async def _sweeper_falso():
-        try:
-            await asyncio.sleep(3600)
-        except asyncio.CancelledError:
-            log.append("sweeper cancelado")
-            raise
+    def _job_falso(nome):
+        async def _f():
+            try:
+                await asyncio.sleep(3600)
+            except asyncio.CancelledError:
+                log.append(f"{nome} cancelado")
+                raise
 
-    monkeypatch.setattr(main, "rodar_sweeper", _sweeper_falso)
+        return _f
+
+    monkeypatch.setattr(main, "rodar_sweeper", _job_falso("sweeper"))
+    monkeypatch.setattr(main, "rodar_avisador", _job_falso("avisador"))
 
 
 def _subir_e_descer():
@@ -76,6 +80,8 @@ def test_cria_na_ordem_e_fecha_na_inversa(monkeypatch):
         "criou embeddings",
         "criou chat",
         "criou anexos",
+        # LIFO: o avisador é o último a subir, então é o primeiro a cair.
+        "avisador cancelado",
         "sweeper cancelado",
         "fechou anexos",
         "fechou chat",
@@ -131,3 +137,13 @@ def test_falha_ao_fechar_o_pool_ainda_propaga(monkeypatch):
 
     with pytest.raises(RuntimeError, match="falha ao fechar pool"):
         _subir_e_descer()
+
+
+def test_avisador_morre_antes_do_pool(monkeypatch):
+    """Mesmo invariante do sweeper: ele usa o pool, então cai antes dele."""
+    log = []
+    _instrumentar(monkeypatch, log)
+
+    _subir_e_descer()
+
+    assert log.index("avisador cancelado") < log.index("fechou pool")

@@ -33,7 +33,25 @@ class MensagemAtendimento(str, Enum):
     REGRA_NAO_ENCONTRADA = "regra_nao_encontrada"
 
 
-Identidade = Mensagem | MensagemAtendimento | MensagemReserva | MensagemOcorrencia
+class MensagemSindico(str, Enum):
+    """As únicas mensagens cujo destinatário NÃO é o morador.
+
+    Moram aqui pelo mesmo motivo de MensagemAtendimento: não há motor de síndico
+    que as emita — quem as produz é a casca.
+    """
+
+    AVISO_RESERVA = "aviso_reserva"
+    AVISO_OCORRENCIA = "aviso_ocorrencia"
+    SEM_CANAL = "sem_canal"
+
+
+Identidade = (
+    Mensagem
+    | MensagemAtendimento
+    | MensagemSindico
+    | MensagemReserva
+    | MensagemOcorrencia
+)
 
 _TIPOS_OCORRENCIA = {
     TipoSolicitacao.RECLAMACAO: "Reclamação",
@@ -57,6 +75,10 @@ _MENU = "Como posso ajudar?\n\n{opcoes}\n\nResponda com o número.".format(
 )
 
 _SIM_NAO = "1 - Sim\n2 - Não"
+
+# LGPD: o pedido segue ao síndico com o número de quem pediu. A base legal é
+# procedimento a pedido do titular, então basta transparência — não consentimento.
+_TRANSPARENCIA = "O síndico recebe seu número e este pedido."
 
 # Gerada do enum, como o menu: número e destino não podem divergir em silêncio.
 _TELA_TIPOS = "\n".join(
@@ -103,6 +125,12 @@ _CONSTANTES: dict[Identidade, str] = {
     ),
     MensagemAtendimento.REGRA_NAO_ENCONTRADA: (
         "Não encontrei essa regra no regimento. Sugiro falar com o síndico."
+    ),
+    # Sem promessa de painel: ele não existe até a Fase 5, e o que o síndico
+    # responder aqui ninguém lê ainda (a máquina de resposta é da Etapa 6).
+    MensagemSindico.SEM_CANAL: (
+        "Olá! Este número é o do síndico. Por aqui eu só envio os avisos de "
+        "novos pedidos — ainda não consigo conversar."
     ),
     Mensagem.NADA_AGENDADO: f"Ok, não agendei nada.\n\n{_MENU}",
     Mensagem.NADA_REGISTRADO: f"Ok, não registrei nada.\n\n{_MENU}",
@@ -206,6 +234,8 @@ def renderizar(
     tipo: TipoSolicitacao | None = None,
     descricao: str | None = None,
     anexos: Sequence[Anexo] = (),
+    identificador: str | None = None,
+    telefone_morador: str | None = None,
 ) -> str:
     """Traduz a identidade da mensagem no texto que o morador recebe.
 
@@ -249,7 +279,8 @@ def renderizar(
             return (
                 "Pronto! Registrei seu pedido:\n\n"
                 f"{_exigir(area, 'o nome da área')}\n{_longo(_exigir(dia, 'a data'))}"
-                f"\n\nEstá pendente de aprovação do síndico.\n\n{_MENU}"
+                f"\n\nEstá pendente de aprovação do síndico.\n{_TRANSPARENCIA}"
+                f"\n\n{_MENU}"
             )
         case MensagemOcorrencia.CONFIRMAR:
             return (
@@ -264,7 +295,22 @@ def renderizar(
         case MensagemOcorrencia.REGISTRADA:
             return (
                 f"Pronto! Registrei:\n\n{_resumo(tipo, descricao, anexos)}"
-                f"\n\n{_MENU}"
+                f"\n{_TRANSPARENCIA}\n\n{_MENU}"
+            )
+        case MensagemSindico.AVISO_RESERVA:
+            return (
+                f"Reserva #{_exigir(identificador, 'o identificador')}\n\n"
+                f"{_exigir(area, 'o nome da área')}\n"
+                f"{_longo(_exigir(dia, 'a data'))}\n\n"
+                f"Morador: {_exigir(telefone_morador, 'o telefone do morador')}\n\n"
+                "Pendente de aprovação no painel."
+            )
+        case MensagemSindico.AVISO_OCORRENCIA:
+            return (
+                f"Ocorrência #{_exigir(identificador, 'o identificador')}\n\n"
+                f"{_resumo(tipo, descricao, anexos)}\n\n"
+                f"Morador: {_exigir(telefone_morador, 'o telefone do morador')}\n\n"
+                "Registrada no painel."
             )
         case Mensagem.PEDIR_CONDOMINIO:
             return (

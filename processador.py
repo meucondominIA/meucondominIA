@@ -27,6 +27,7 @@ from atendimento import (
     responder,
     retomar_com_anexo,
 )
+from condominios import condominio_do_sindico
 from db import get_pool
 from ocorrencia import MensagemOcorrencia
 from geracao import responder_duvida
@@ -38,14 +39,44 @@ from mensagens import (
     registrar_saida,
     saida_ja_existe,
 )
-from textos import MensagemAtendimento, renderizar
+from textos import MensagemAtendimento, MensagemSindico, renderizar
 from zpro_client import OutgoingMessage, enviar
 from zpro_models import IncomingMessage
 
 logger = logging.getLogger(__name__)
 
 
+async def _atender_sindico(msg: IncomingMessage) -> bool:
+    """Reconhece o síndico antes do fluxo de morador; True se era ele.
+
+    Sem isto o número dele abre conversa em 'identificacao' e o "1" da resposta
+    vira escolha de condomínio da lista.
+
+    Não abre conversa nem grava em mensagens: não há estado de síndico no
+    chk_conversas_estado_coerente, e criá-lo é da Etapa 6. O rastro do que ele
+    disse já está em webhook_events. Conexão devolvida antes do envio.
+    """
+    async with get_pool().acquire() as conn:
+        condominio = await condominio_do_sindico(conn, msg.phone)
+
+    if condominio is None:
+        return False
+
+    logger.info("mensagem de síndico: condominio=%s", condominio)
+    await enviar(
+        OutgoingMessage(
+            phone=msg.phone,
+            text=renderizar(MensagemSindico.SEM_CANAL),
+            external_key=msg.message_id,
+        )
+    )
+    return True
+
+
 async def processar_mensagem(msg: IncomingMessage) -> None:
+    if await _atender_sindico(msg):
+        return
+
     async with get_pool().acquire() as conn:
         async with conn.transaction():
             conversa, conversa_nova = await conversa_ativa(conn, msg.phone)
