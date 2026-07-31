@@ -20,6 +20,27 @@ create extension btree_gist;
 -- operador <=> não resolve. Vale para as PRÓXIMAS conexões (as dos testes).
 alter role test set search_path = "$user", public, extensions;
 
+-- ── O mundo do Supabase que este container não tem (Fase 5 · Etapa 1) ───────
+-- auth.users com UMA coluna de propósito: a FK de condominios.sindico_user_id
+-- só toca a PK, e a doc do Supabase avisa que o resto do schema auth "may
+-- change at any time" — copiar mais seria ficção com mais superfície para
+-- envelhecer (https://supabase.com/docs/guides/auth/managing-user-data).
+create schema auth;
+create table auth.users (id uuid primary key);
+
+-- auth.uid(): corpo COPIADO VERBATIM da produção em 31/07/2026, via
+--   select pg_get_functiondef('auth.uid'::regproc);
+-- É cópia congelada de código que não é nosso: se o Supabase mudar a função,
+-- este espelho diverge e NADA avisa. A conferência é manual, rodando a função
+-- de verdade contra a produção (ver docs da Etapa 1).
+create or replace function auth.uid() returns uuid language sql stable as $function$
+  select
+  coalesce(
+    nullif(current_setting('request.jwt.claim.sub', true), ''),
+    (nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'sub')
+  )::uuid
+$function$;
+
 -- Stubs mínimos: FKs + o slug consultado por condominios.py (UNIQUE e CHECK
 -- como na produção; nullable AQUI, ao contrário da produção, para os inserts
 -- `default values` dos outros testes continuarem válidos). `nome` entra pelo
@@ -36,13 +57,43 @@ create table public.condominios (
   -- moradores.telefone: casa com normalize_phone, que só mantém dígitos.
   sindico_telefone text
     constraint chk_condominios_sindico_telefone
-      check (sindico_telefone is null or sindico_telefone ~ '^[0-9]{10,15}$')
+      check (sindico_telefone is null or sindico_telefone ~ '^[0-9]{10,15}$'),
+  -- identidade do síndico (Fase 5 · Etapa 1, 20260731205800). RESTRICT é fiel à
+  -- produção: com SET NULL o delete do usuário passaria e o condomínio ficaria
+  -- órfão em silêncio.
+  sindico_user_id uuid references auth.users (id) on delete restrict
 );
 -- Parcial: é ele que torna o lookup reverso da borda (telefone → condomínio)
 -- single-valued, deixando "mesmo número em 2 condomínios" ingravável.
 create unique index uq_condominios_sindico_telefone
   on public.condominios (sindico_telefone)
   where (sindico_telefone is not null);
+-- O gêmeo no eixo da identidade: é ele que impede o estado em que
+-- privado.meu_condominio() escolheria uma linha arbitrária sem erro.
+create unique index uq_condominios_sindico_user
+  on public.condominios (sindico_user_id)
+  where (sindico_user_id is not null);
+
+-- ── privado.meu_condominio() (Fase 5 · Etapa 1) ─────────────────────────────
+-- O schema existe aqui só para hospedar a função com o MESMO nome qualificado
+-- da produção; a proteção real dele (ficar fora da Data API) não tem o que
+-- exercitar num container sem PostgREST.
+create schema privado;
+
+-- Idêntica à migration nos 4 atributos. SEM os grant/revoke: os papéis
+-- `authenticated`/`anon` não existem num Postgres puro, e criá-los aqui seria
+-- inventar dois roles de mentira para não testar nada. Isso fica para a Etapa 2,
+-- junto com as policies e o role sem BYPASSRLS.
+create function privado.meu_condominio()
+returns uuid
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select id from public.condominios where sindico_user_id = auth.uid()
+$$;
+
 create table public.moradores (id uuid primary key default gen_random_uuid());
 
 create or replace function public.set_updated_at()

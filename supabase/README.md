@@ -33,6 +33,24 @@ Fluxos possíveis:
   → editar o SQL → `supabase db push`. Conferir sincronia com
   `supabase migration list`; corrigir divergência com `supabase migration repair`.
 
+## Seed do piloto (TEMPORÁRIO — Fase 5)
+
+`seed_piloto.sql` **não** é o `seed.sql` do Supabase CLI: aquele nome é disparado
+por `supabase db reset`, fluxo que este projeto não usa (não há `config.toml` nem
+CLI instalado). Este é aplicado sob demanda, pelo agente do Supabase — o TCP 5432
+não abre do ambiente do assistente, então MCP é o único caminho até o banco.
+
+Ele existe só para o portal ter o que ler enquanto as Etapas 3/4 são construídas,
+e **morre depois disso**. A ordem de desmonte está no cabeçalho do próprio
+arquivo; a regra que a torna obrigatória é a FK `condominios.sindico_user_id`
+(`ON DELETE RESTRICT`): sem zerar o vínculo antes, o banco recusa apagar os
+usuários no painel.
+
+A seção 1 (LIMPAR) roda sempre, antes de semear — é o que dá idempotência e o que
+mantém o mecanismo de remoção exercitado. Verificado em laboratório (31/07/2026):
+semear duas vezes não duplica, e depois da limpeza o censo (hash de conteúdo) das
+12 tabelas volta idêntico ao estado anterior ao seed.
+
 ## Débito conhecido e aceito
 
 - **Lint 0014 (`extension_in_public`)**: `btree_gist` está no schema `public`.
