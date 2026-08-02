@@ -21,9 +21,11 @@ pytestmark = pytest.mark.integration
 def test_slug_resolve_para_o_id_certo_entre_varios(rodar_tx):
     async def body(conn):
         esperado = await conn.fetchval(
-            "insert into condominios (slug) values ('res-gabro') returning id"
+            "insert into condominios (slug, nome) values ('res-gabro', 'Gabro') returning id"
         )
-        await conn.execute("insert into condominios (slug) values ('outro-cond')")
+        await conn.execute(
+            "insert into condominios (slug, nome) values ('outro-cond', 'Outro')"
+        )
         assert await buscar_id_por_slug(conn, "res-gabro") == esperado
 
     rodar_tx(body)
@@ -31,7 +33,9 @@ def test_slug_resolve_para_o_id_certo_entre_varios(rodar_tx):
 
 def test_slug_inexistente_devolve_none(rodar_tx):
     async def body(conn):
-        await conn.execute("insert into condominios (slug) values ('res-gabro')")
+        await conn.execute(
+            "insert into condominios (slug, nome) values ('res-gabro', 'Gabro')"
+        )
         assert await buscar_id_por_slug(conn, "res-gabr") is None
 
     rodar_tx(body)
@@ -39,11 +43,13 @@ def test_slug_inexistente_devolve_none(rodar_tx):
 
 def test_unique_barra_slug_duplicado(rodar_tx):
     async def body(conn):
-        await conn.execute("insert into condominios (slug) values ('res-gabro')")
+        await conn.execute(
+            "insert into condominios (slug, nome) values ('res-gabro', 'Gabro')"
+        )
         with pytest.raises(asyncpg.UniqueViolationError):
             async with conn.transaction():
                 await conn.execute(
-                    "insert into condominios (slug) values ('res-gabro')"
+                    "insert into condominios (slug, nome) values ('res-gabro', 'Gabro')"
                 )
 
     rodar_tx(body)
@@ -54,7 +60,7 @@ def test_check_barra_formato_invalido(rodar_tx):
         with pytest.raises(asyncpg.CheckViolationError):
             async with conn.transaction():
                 await conn.execute(
-                    "insert into condominios (slug) values ('Res Gabro')"
+                    "insert into condominios (slug, nome) values ('Res Gabro', 'Gabro')"
                 )
 
     rodar_tx(body)

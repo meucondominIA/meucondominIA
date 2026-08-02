@@ -40,7 +40,11 @@ def _lote(documento: str, artigos: int, versao: str = "v1"):
 
 
 async def _novo_condominio(conn) -> UUID:
-    return await conn.fetchval("insert into condominios default values returning id")
+    return await conn.fetchval(
+        "insert into condominios (slug, nome) "
+        "values ('t-' || gen_random_uuid()::text, 'Condomínio de teste') "
+        "returning id"
+    )
 
 
 async def _semear(conn) -> tuple[UUID, UUID]:

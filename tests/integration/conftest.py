@@ -7,6 +7,12 @@ igual à produção. A prontidão do Postgres é resolvida por um retry de conex
 
 Se testcontainers não estiver instalado ou o Docker indisponível, os testes de
 integração são PULADOS (o resto da suíte segue normal).
+
+Desde a Fase 5 · Etapa 2 o schema NÃO é mais um espelho mantido à mão: o banco é
+construído pelas supabase/migrations/ reais, precedidas de um preâmbulo que
+sintetiza o mundo do Supabase (schema auth, auth.uid(), os papéis anon/
+authenticated e os grants de fábrica). O antigo schema.sql tinha 11 das 12
+tabelas e mentia a nulabilidade de duas colunas, sem que nada detectasse.
 """
 
 import asyncio
@@ -25,10 +31,32 @@ except ImportError:
     _TEM_TESTCONTAINERS = False
 
 _IMAGE = "pgvector/pgvector:pg17"
-_SCHEMA = (pathlib.Path(__file__).parent / "schema.sql").read_text(encoding="utf-8")
+_DIR = pathlib.Path(__file__).parent
+_PREAMBULO = (_DIR / "preambulo_supabase.sql").read_text(encoding="utf-8")
+_MIGRATIONS = sorted((_DIR.parents[1] / "supabase" / "migrations").glob("*.sql"))
+
+# 20260706191900 faz `create extension pg_cron`, que não existe nesta imagem e
+# não tem por que existir: o agendamento é da produção, não do teste. O stub dá à
+# migration o que ela pede (o schema `cron` e uma `schedule` que devolve um id)
+# sem fingir que há um agendador. Escrito ANTES das migrations, via `pg_config`
+# para não fixar a versão do Postgres no caminho.
+_STUB_PG_CRON = """set -e
+DIR="$(pg_config --sharedir)/extension"
+cat > "$DIR/pg_cron.control" <<'CTRL'
+default_version = '1.6'
+comment = 'stub dos testes de integração — NÃO é o pg_cron real'
+relocatable = false
+schema = pg_catalog
+CTRL
+cat > "$DIR/pg_cron--1.6.sql" <<'SQL'
+create schema cron;
+create function cron.schedule(text, text, text) returns bigint
+  language sql as $stub$ select 1::bigint $stub$;
+SQL
+"""
 
 
-async def _aplicar_schema(dsn: str) -> None:
+async def _construir_banco(dsn: str) -> None:
     # O TCP só aceita conexões após o boot final do Postgres: tenta com paciência.
     ultimo_erro: Exception | None = None
     conn: asyncpg.Connection | None = None
@@ -44,7 +72,17 @@ async def _aplicar_schema(dsn: str) -> None:
             f"Postgres do container não respondeu a tempo: {ultimo_erro}"
         )
     try:
-        await conn.execute(_SCHEMA)
+        if not _MIGRATIONS:
+            raise RuntimeError(
+                "nenhuma migration encontrada em supabase/migrations/ — o banco de "
+                "teste ficaria vazio e os erros apareceriam longe daqui"
+            )
+        await conn.execute(_PREAMBULO)
+        for migration in _MIGRATIONS:
+            try:
+                await conn.execute(migration.read_text(encoding="utf-8"))
+            except asyncpg.PostgresError as exc:
+                raise RuntimeError(f"migration {migration.name}: {exc}") from exc
     finally:
         await conn.close()
 
@@ -72,7 +110,10 @@ def pg_dsn():
         host = container.get_container_host_ip()
         port = container.get_exposed_port(5432)
         dsn = f"postgresql://test:test@{host}:{port}/test"
-        asyncio.run(_aplicar_schema(dsn))
+        codigo, saida = container.exec(["sh", "-c", _STUB_PG_CRON])
+        if codigo != 0:
+            raise RuntimeError(f"stub do pg_cron falhou: {saida!r}")
+        asyncio.run(_construir_banco(dsn))
         yield dsn
     finally:
         container.stop()
