@@ -5,6 +5,7 @@ import './globals.css'
 export const metadata: Metadata = {
   title: 'Portal do síndico',
   description: 'Área do síndico do condomínio.',
+  formatDetection: { telephone: false },
 }
 
 export const viewport: Viewport = {

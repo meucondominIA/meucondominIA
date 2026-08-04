@@ -1,5 +1,7 @@
 import { redirect } from 'next/navigation'
 
+import { carregarPainel, type Condominio, type Reserva } from '@/lib/consultas'
+import { formatarPeriodo, formatarTelefone, jaPassou } from '@/lib/formato'
 import { clienteServidor } from '@/lib/supabase/servidor'
 
 import { sair } from './acoes'
@@ -21,27 +23,107 @@ export default async function Painel() {
     redirect('/entrar')
   }
 
+  const painel = await carregarPainel()
+  const agora = new Date().toISOString()
+
   return (
     <main>
-      <h1>Painel do síndico</h1>
-      <p>Sessão validada.</p>
+      <header>
+        <h1>{painel.tipo === 'ok' ? painel.condominio.nome : 'Portal do síndico'}</h1>
+        <form action={sair}>
+          <button type="submit" className="secundario">
+            Sair
+          </button>
+        </form>
+      </header>
 
-      <dl>
-        <dt>identificador</dt>
-        <dd>
-          <code>{claims.sub}</code>
-        </dd>
-        <dt>assinatura</dt>
-        <dd>ES256, verificada localmente</dd>
-      </dl>
+      {painel.tipo === 'sem_vinculo' ? (
+        <p role="alert">
+          Sua conta não está vinculada a nenhum condomínio. Procure o administrador com este
+          identificador: <code>{String(claims.sub)}</code>
+        </p>
+      ) : null}
 
-      <p className="nota">A lista de reservas chega na Etapa 4.</p>
+      {painel.tipo === 'erro' ? (
+        <p role="alert">
+          Não foi possível carregar as reservas (código {painel.codigo}). Recarregue a página;
+          se persistir, avise o administrador.
+        </p>
+      ) : null}
 
-      <form action={sair}>
-        <button type="submit" className="secundario">
-          Sair
-        </button>
-      </form>
+      {painel.tipo === 'ok' ? (
+        <>
+          <section>
+            <h2>Pendentes ({painel.pendentes.length})</h2>
+            {painel.pendentes.length === 0 ? (
+              <p className="nota">Nenhuma reserva aguardando decisão.</p>
+            ) : (
+              <ul>
+                {painel.pendentes.map((reserva) => (
+                  <Cartao
+                    key={reserva.id}
+                    reserva={reserva}
+                    condominio={painel.condominio}
+                    agora={agora}
+                  />
+                ))}
+              </ul>
+            )}
+          </section>
+
+          <section>
+            <h2>Últimas decisões</h2>
+            {painel.decididas.length === 0 ? (
+              <p className="nota">Nenhuma reserva decidida ainda.</p>
+            ) : (
+              <ul>
+                {painel.decididas.map((reserva) => (
+                  <Cartao
+                    key={reserva.id}
+                    reserva={reserva}
+                    condominio={painel.condominio}
+                    agora={agora}
+                    decidida
+                  />
+                ))}
+              </ul>
+            )}
+          </section>
+        </>
+      ) : null}
     </main>
+  )
+}
+
+function Cartao({
+  reserva,
+  condominio,
+  agora,
+  decidida = false,
+}: {
+  reserva: Reserva
+  condominio: Condominio
+  agora: string
+  decidida?: boolean
+}) {
+  const tz = condominio.timezone
+  const vencida = !decidida && jaPassou(reserva.fim, agora)
+
+  return (
+    <li className="cartao">
+      <p className="area">
+        {reserva.areas_comuns?.nome ?? 'Área desconhecida'}
+        {decidida ? <span className="selo">{reserva.status}</span> : null}
+      </p>
+
+      <p>
+        {formatarPeriodo(reserva.inicio, reserva.fim, tz)}
+        {vencida ? <span className="selo alerta">já passou</span> : null}
+      </p>
+
+      {decidida ? null : <p className="nota">{formatarTelefone(reserva.telefone)}</p>}
+
+      {reserva.observacao ? <p className="nota">{reserva.observacao}</p> : null}
+    </li>
   )
 }
