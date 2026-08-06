@@ -17,6 +17,7 @@ from roteador import (
     Conversa,
     DelegarDuvida,
     DelegarIdentificacao,
+    DelegarMinhasReservas,
     DelegarOcorrencia,
     DelegarReserva,
     Estado,
@@ -172,10 +173,14 @@ def test_menu_trocar_condominio_zera_o_tenant():
     assert decisao.transicao.condominio_id is None  # não pode sobrar o antigo
 
 
-@pytest.mark.parametrize("texto", ["5", "6", "7", "8", "42"])
+@pytest.mark.parametrize("texto", ["6", "7", "8", "42"])
 def test_menu_numero_reservado_ou_fora_da_faixa(texto):
-    """5..8 são reservados sem dono; 42 é fora de tudo. Todos: não entendido."""
+    """6..8 seguem reservados sem dono; 42 é fora de tudo. Todos: não entendido."""
     assert _texto(MENU, texto) == Responder(mensagem=Mensagem.MENU_NAO_ENTENDIDO)
+
+
+def test_menu_opcao_5_abre_minhas_reservas():
+    assert _texto(MENU, "5") == DelegarMinhasReservas(escolha="5")
 
 
 @pytest.mark.parametrize("texto", ["quero falar com o sindico", "oi", "   "])
@@ -302,6 +307,10 @@ OCORRENCIA = _conversa(
     Estado.OCORRENCIA, condominio=CONDOMINIO, rascunho={"passo": "tipo"}
 )
 
+MINHAS_RESERVAS = _conversa(
+    Estado.MINHAS_RESERVAS, condominio=CONDOMINIO, rascunho={"passo": "lista"}
+)
+
 
 def test_ocorrencia_escape_volta_ao_menu_sem_registrar():
     decisao = _texto(OCORRENCIA, "0")
@@ -415,6 +424,7 @@ def test_estados_do_python_batem_com_o_check_do_banco():
         Transicao.para_duvidas(CONDOMINIO),
         Transicao.para_reserva(CONDOMINIO, {"passo": "area"}),
         Transicao.para_ocorrencia(CONDOMINIO, {"passo": "tipo"}),
+        Transicao.para_minhas_reservas(CONDOMINIO, {"passo": "lista"}),
     ],
 )
 def test_construtores_produzem_destino_coerente(transicao):
@@ -426,11 +436,19 @@ def test_construtores_produzem_destino_coerente(transicao):
             assert transicao.condominio_pendente is None
         case Estado.AGUARDANDO_CONFIRMACAO:
             assert transicao.condominio_id is None
-        case Estado.MENU | Estado.DUVIDAS | Estado.RESERVA | Estado.OCORRENCIA:
+        case (
+            Estado.MENU
+            | Estado.DUVIDAS
+            | Estado.RESERVA
+            | Estado.OCORRENCIA
+            | Estado.MINHAS_RESERVAS
+        ):
             assert transicao.condominio_id is not None
             assert transicao.condominio_pendente is None
 
-    if transicao.estado in (Estado.RESERVA, Estado.OCORRENCIA):
+    if transicao.estado in (
+        Estado.RESERVA, Estado.OCORRENCIA, Estado.MINHAS_RESERVAS
+    ):
         assert isinstance(transicao.rascunho, dict)
     else:
         assert transicao.rascunho is None
@@ -453,12 +471,13 @@ def test_toda_mensagem_declarada_e_alcancavel():
         DUVIDAS,
         RESERVA,
         OCORRENCIA,
+        MINHAS_RESERVAS,
     ]
     emitidas = set()
     for conversa in conversas:
         emitidas.add(_audio(conversa).mensagem)
         for reconfirmar in (False, True):
-            for texto in ("1", "2", "3", "4", "5", "0", "9", "oi", "   "):
+            for texto in ("1", "2", "3", "4", "5", "6", "0", "9", "oi", "   "):
                 decisao = _texto(conversa, texto, precisa_reconfirmar=reconfirmar)
                 if isinstance(decisao, Responder):
                     emitidas.add(decisao.mensagem)

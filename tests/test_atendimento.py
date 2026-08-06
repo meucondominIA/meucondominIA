@@ -286,3 +286,72 @@ def test_audio_recebe_so_entendo_texto():
 
     assert "texto" in texto.lower()
     assert transicao is None
+
+
+# ── a corrida perdida (reserva automática) ───────────────────────────────────
+
+
+class _ConnTx:
+    """Conexão fake com transação: o `async with` precisa existir para provarmos
+    que o except do _gravar fica FORA dele."""
+
+    def __init__(self):
+        self.saidas = []
+
+    def transaction(self):
+        registro = self.saidas
+
+        class _Tx:
+            async def __aenter__(self):
+                return None
+
+            async def __aexit__(self, tipo, exc, tb):
+                registro.append(tipo)
+                return False
+
+        return _Tx()
+
+
+def test_23p01_vira_data_tomada_e_nao_engole_o_rollback(monkeypatch):
+    """A perdedora da corrida não recebe erro: recebe a lista atualizada. E o
+    except mora fora da transação, senão o rollback não teria acontecido."""
+    import asyncpg
+
+    from areas import AreaReservavel
+    from reserva import Concluir
+
+    conn = _ConnTx()
+    area = AreaReservavel(id=C2, nome="Salão de Festas")
+
+    async def _tz(conn, condominio_id):
+        return "America/Sao_Paulo"
+
+    async def _explode(conn, **kwargs):
+        raise asyncpg.ExclusionViolationError("conflicting key value")
+
+    async def _nunca(conn, **kwargs):
+        raise AssertionError("aviso enfileirado para reserva que não existiu")
+
+    async def _dias(conn, **kwargs):
+        return [date(2026, 8, 20), date(2026, 8, 21)]
+
+    monkeypatch.setattr(atendimento, "timezone_por_id", _tz)
+    monkeypatch.setattr(atendimento, "confirmar_reserva", _explode)
+    monkeypatch.setattr(atendimento, "enfileirar_aviso_reserva", _nunca)
+    monkeypatch.setattr(atendimento, "dias_livres", _dias)
+
+    conversa = _conversa(Estado.RESERVA, condominio=C1)
+    texto, transicao = asyncio.run(
+        atendimento._gravar(
+            conn,
+            conversa,
+            Concluir(area_id=C2, dia=date(2026, 8, 12)),
+            [area],
+            uuid4(),
+            0,
+        )
+    )
+
+    assert "acabou de ser reservada por outro morador" in texto
+    assert transicao.estado is Estado.RESERVA
+    assert conn.saidas == [asyncpg.ExclusionViolationError]

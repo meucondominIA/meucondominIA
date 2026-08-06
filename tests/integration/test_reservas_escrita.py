@@ -1,4 +1,4 @@
-"""Integração: criar_reserva_pendente contra Postgres real (Fase 4 · Etapa 2).
+"""Integração: confirmar_reserva contra Postgres real (Fase 4 · Etapa 2).
 
 O que fake nenhum pega: a tradução do dia civil para instantes, o gate de
 idempotência no índice único parcial, o NOT EXISTS que sustenta o D4 na escrita e
@@ -10,7 +10,7 @@ from datetime import date
 import asyncpg
 import pytest
 
-from reservas import criar_reserva_pendente
+from reservas import confirmar_reserva
 
 pytestmark = pytest.mark.integration
 
@@ -60,7 +60,7 @@ async def _aprovada(conn, cond, area, dia):
     )
 
 
-def test_grava_pendente_com_tenant_e_dia_civil_no_fuso(rodar_tx):
+def test_grava_confirmada_com_tenant_e_dia_civil_no_fuso(rodar_tx):
     """15/08 no condomínio = [15/08 00:00 -03, 16/08 00:00 -03) em timestamptz."""
 
     async def body(conn):
@@ -68,7 +68,7 @@ def test_grava_pendente_com_tenant_e_dia_civil_no_fuso(rodar_tx):
         a = await _area(conn, c)
         m = await _mensagem(conn, "5555990001001")
 
-        rid = await criar_reserva_pendente(
+        rid = await confirmar_reserva(
             conn,
             condominio_id=c,
             area_id=a,
@@ -86,7 +86,7 @@ def test_grava_pendente_com_tenant_e_dia_civil_no_fuso(rodar_tx):
             rid,
             TZ,
         )
-        assert row["status"] == "pendente"
+        assert row["status"] == "aprovada"
         assert (row["condominio_id"], row["area_id"]) == (c, a)
         assert row["telefone"] == "5555990001001"
         assert row["unidade_id"] is None and row["morador_id"] is None
@@ -111,9 +111,9 @@ def test_reprocessamento_devolve_o_mesmo_id_sem_duplicar(rodar_tx):
             origem_mensagem_id=m,
         )
 
-        primeiro = await criar_reserva_pendente(conn, **pedido)
-        segundo = await criar_reserva_pendente(conn, **pedido)
-        terceiro = await criar_reserva_pendente(conn, **pedido)
+        primeiro = await confirmar_reserva(conn, **pedido)
+        segundo = await confirmar_reserva(conn, **pedido)
+        terceiro = await confirmar_reserva(conn, **pedido)
 
         gravadas = await conn.fetchval(
             "select count(*) from reservas where area_id = $1", a
@@ -132,7 +132,7 @@ def test_dia_ocupado_por_pendente_ou_por_aprovada_devolve_none(rodar_tx):
         c = await _cond(conn, "esc-ocupado")
         salao = await _area(conn, c, "Salão")
         churras = await _area(conn, c, "Churrasqueira")
-        await criar_reserva_pendente(
+        await confirmar_reserva(
             conn,
             condominio_id=c,
             area_id=salao,
@@ -143,7 +143,7 @@ def test_dia_ocupado_por_pendente_ou_por_aprovada_devolve_none(rodar_tx):
         )
         await _aprovada(conn, c, churras, DIA)
 
-        sobre_pendente = await criar_reserva_pendente(
+        sobre_pendente = await confirmar_reserva(
             conn,
             condominio_id=c,
             area_id=salao,
@@ -152,7 +152,7 @@ def test_dia_ocupado_por_pendente_ou_por_aprovada_devolve_none(rodar_tx):
             telefone="5555990003004",
             origem_mensagem_id=await _mensagem(conn, "5555990003004"),
         )
-        sobre_aprovada = await criar_reserva_pendente(
+        sobre_aprovada = await confirmar_reserva(
             conn,
             condominio_id=c,
             area_id=churras,
@@ -175,7 +175,7 @@ def test_dias_vizinhos_nao_colidem(rodar_tx):
     async def body(conn):
         c = await _cond(conn, "esc-borda")
         a = await _area(conn, c)
-        primeiro = await criar_reserva_pendente(
+        primeiro = await confirmar_reserva(
             conn,
             condominio_id=c,
             area_id=a,
@@ -184,7 +184,7 @@ def test_dias_vizinhos_nao_colidem(rodar_tx):
             telefone="5555990004004",
             origem_mensagem_id=await _mensagem(conn, "5555990004004"),
         )
-        seguinte = await criar_reserva_pendente(
+        seguinte = await confirmar_reserva(
             conn,
             condominio_id=c,
             area_id=a,
@@ -206,7 +206,7 @@ def test_mesmo_dia_em_condominios_diferentes_gravam_os_dois(rodar_tx):
         aa = await _area(conn, ca)
         ab = await _area(conn, cb)
 
-        na_a = await criar_reserva_pendente(
+        na_a = await confirmar_reserva(
             conn,
             condominio_id=ca,
             area_id=aa,
@@ -215,7 +215,7 @@ def test_mesmo_dia_em_condominios_diferentes_gravam_os_dois(rodar_tx):
             telefone="5555990005005",
             origem_mensagem_id=await _mensagem(conn, "5555990005005"),
         )
-        na_b = await criar_reserva_pendente(
+        na_b = await confirmar_reserva(
             conn,
             condominio_id=cb,
             area_id=ab,
@@ -245,7 +245,7 @@ def test_area_de_outro_condominio_e_erro_do_banco(rodar_tx):
 
         with pytest.raises(asyncpg.ForeignKeyViolationError) as erro:
             async with conn.transaction():
-                await criar_reserva_pendente(
+                await confirmar_reserva(
                     conn,
                     condominio_id=cb,
                     area_id=area_de_a,

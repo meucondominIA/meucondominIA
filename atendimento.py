@@ -25,10 +25,15 @@ from zoneinfo import ZoneInfo
 import asyncpg
 from pydantic import BaseModel, ConfigDict, ValidationError
 
+import minhas_reservas
 import ocorrencia
 import reserva
 from areas import AreaReservavel, listar_areas_reservaveis
-from avisos import enfileirar_aviso_ocorrencia, enfileirar_aviso_reserva
+from avisos import (
+    enfileirar_aviso_cancelamento,
+    enfileirar_aviso_ocorrencia,
+    enfileirar_aviso_reserva,
+)
 from condominios import (
     CondominioElegivel,
     listar_elegiveis,
@@ -38,13 +43,21 @@ from condominios import (
 from config import settings
 from contexto import MAX_TROCAS, Troca
 from mensagens import ultimas_trocas
+from minhas_reservas import MensagemMinhasReservas
 from reserva import MensagemReserva, PaginaDias
-from reservas import criar_reserva_pendente, dias_livres
+from reservas import (
+    ReservaDoMorador,
+    cancelar_reserva,
+    confirmar_reserva,
+    dias_livres,
+    listar_minhas,
+)
 from roteador import (
     Conversa,
     Decisao,
     DelegarDuvida,
     DelegarIdentificacao,
+    DelegarMinhasReservas,
     DelegarOcorrencia,
     DelegarReserva,
     Mensagem,
@@ -147,6 +160,8 @@ async def _resolver(
             )
         case DelegarReserva(escolha=escolha):
             return await _reservar(conn, conversa, escolha, entrada_id)
+        case DelegarMinhasReservas(escolha=escolha):
+            return await _minhas(conn, conversa, escolha)
         case DelegarOcorrencia():
             return await _ocorrer(conn, conversa, decisao, entrada_id, midia)
         case Responder():
@@ -362,39 +377,46 @@ async def _gravar(
 ) -> tuple[str, Transicao]:
     """O único ponto de escrita do fluxo.
 
-    None não é erro: é a corrida real (o dia saiu de baixo entre a tela e o "1").
-    Volta para a lista atualizada, na página onde o morador estava. Quem decide
-    quem venceu é o banco, como a Etapa 2 desenhou.
+    Duas causas para não confirmar, uma saída só: o NOT EXISTS devolve None
+    quando o dia saiu há horas, e a exclusion constraint levanta 23P01 quando
+    saiu no mesmo instante. As duas voltam para a lista atualizada, na página
+    onde o morador estava.
 
-    A transação amarra o pedido ao aviso. Dia tomado não enfileira: não há pedido
-    a avisar.
+    O except ENVOLVE a transação: dentro dela a conexão já estaria abortada, e o
+    rollback é o que leva o aviso junto com o pedido que não existiu.
     """
     tz = await timezone_por_id(conn, conversa.condominio_id)
     nome = _nome_area(areas, pedido.area_id)
 
-    async with conn.transaction():
-        reserva_id = await criar_reserva_pendente(
-            conn,
-            condominio_id=conversa.condominio_id,
-            area_id=pedido.area_id,
-            dia=pedido.dia,
-            tz=tz,
-            telefone=conversa.telefone,
-            origem_mensagem_id=entrada_id,
-        )
-        if reserva_id is not None:
-            await enfileirar_aviso_reserva(
+    try:
+        async with conn.transaction():
+            reserva_id = await confirmar_reserva(
                 conn,
                 condominio_id=conversa.condominio_id,
-                reserva_id=reserva_id,
-                texto=renderizar(
-                    MensagemSindico.AVISO_RESERVA,
-                    identificador=_identificador(reserva_id),
-                    area=nome,
-                    dia=pedido.dia,
-                    telefone_morador=conversa.telefone,
-                ),
+                area_id=pedido.area_id,
+                dia=pedido.dia,
+                tz=tz,
+                telefone=conversa.telefone,
+                origem_mensagem_id=entrada_id,
             )
+            if reserva_id is not None:
+                await enfileirar_aviso_reserva(
+                    conn,
+                    condominio_id=conversa.condominio_id,
+                    reserva_id=reserva_id,
+                    texto=renderizar(
+                        MensagemSindico.AVISO_RESERVA,
+                        identificador=_identificador(reserva_id),
+                        area=nome,
+                        dia=pedido.dia,
+                        telefone_morador=conversa.telefone,
+                    ),
+                )
+    except asyncpg.ExclusionViolationError:
+        logger.info(
+            "corrida perdida (23P01): conversa=%s dia=%s", conversa.id, pedido.dia
+        )
+        reserva_id = None
 
     if reserva_id is None:
         return await _dias(
@@ -408,17 +430,133 @@ async def _gravar(
             areas,
         )
 
-    logger.info("reserva pendente: id=%s conversa=%s", reserva_id, conversa.id)
+    logger.info("reserva confirmada: id=%s conversa=%s", reserva_id, conversa.id)
     return (
-        renderizar(MensagemReserva.RESERVA_REGISTRADA, area=nome, dia=pedido.dia),
+        renderizar(MensagemReserva.RESERVA_CONFIRMADA, area=nome, dia=pedido.dia),
         Transicao.para_menu(conversa.condominio_id),
     )
 
 
 def _identificador(pedido_id: UUID) -> str:
-    """O que o síndico lê e cita. Curto porque ele nunca digita: a aprovação é no
-    portal, que correlaciona pelo uuid inteiro."""
+    """O que o síndico lê e cita. Curto porque ele nunca digita: é referência
+    falada, e os dois avisos da mesma reserva têm que produzi-la igual."""
     return pedido_id.hex[:8]
+
+
+# ── minhas reservas (reserva automática) ─────────────────────────────────────
+
+
+async def _minhas(
+    conn: asyncpg.Connection, conversa: Conversa, escolha: str
+) -> tuple[str, Transicao | None]:
+    """O sanduíche do fluxo de cancelamento: lê, decide sem I/O, executa."""
+    avanco = minhas_reservas.avancar(_rascunho_minhas(conversa), escolha)
+
+    match avanco:
+        case minhas_reservas.MostrarLista():
+            return await _listar(conn, conversa)
+        case minhas_reservas.Continuar():
+            return _tela_minhas(avanco, conversa)
+        case minhas_reservas.Cancelar(item=item):
+            return await _cancelar(conn, conversa, item)
+        case minhas_reservas.Encerrar(mensagem=mensagem):
+            return renderizar(mensagem), Transicao.para_menu(conversa.condominio_id)
+
+
+def _rascunho_minhas(conversa: Conversa) -> minhas_reservas.Rascunho | None:
+    """Rascunho ilegível reinicia o fluxo — nada foi cancelado até a confirmação."""
+    if conversa.rascunho is None:
+        return None
+    try:
+        return minhas_reservas.ler(conversa.rascunho)
+    except ValidationError:
+        logger.exception("rascunho ilegível — reiniciando: conversa=%s", conversa.id)
+        return None
+
+
+async def _listar(
+    conn: asyncpg.Connection, conversa: Conversa
+) -> tuple[str, Transicao]:
+    """Lê a agenda do morador e CONGELA o mapeamento número→reserva da tela."""
+    tz = await timezone_por_id(conn, conversa.condominio_id)
+    reservas = await listar_minhas(
+        conn,
+        telefone=conversa.telefone,
+        condominio_id=conversa.condominio_id,
+        tz=tz,
+    )
+    if not reservas:
+        return (
+            renderizar(MensagemMinhasReservas.SEM_RESERVAS),
+            Transicao.para_menu(conversa.condominio_id),
+        )
+    return (
+        renderizar(MensagemMinhasReservas.LISTA, reservas=reservas),
+        Transicao.para_minhas_reservas(
+            conversa.condominio_id,
+            minhas_reservas.gravar(minhas_reservas.RascunhoLista(opcoes=reservas)),
+        ),
+    )
+
+
+def _tela_minhas(
+    avanco: minhas_reservas.Continuar, conversa: Conversa
+) -> tuple[str, Transicao]:
+    """Tela renderizável sem I/O novo: o rascunho já carrega o que ela cita."""
+    rascunho = avanco.rascunho
+    match rascunho:
+        case minhas_reservas.RascunhoLista():
+            texto = renderizar(avanco.mensagem, reservas=rascunho.opcoes)
+        case minhas_reservas.RascunhoConfirmacao():
+            texto = renderizar(
+                avanco.mensagem, area=rascunho.item.area, dia=rascunho.item.dia
+            )
+    return texto, Transicao.para_minhas_reservas(
+        conversa.condominio_id, minhas_reservas.gravar(rascunho)
+    )
+
+
+async def _cancelar(
+    conn: asyncpg.Connection, conversa: Conversa, item: ReservaDoMorador
+) -> tuple[str, Transicao]:
+    """O único ponto de escrita do fluxo. A transação amarra o cancelamento ao
+    aviso, como o pedido ao dele.
+
+    None não é erro: é a segunda vez. O aviso mora dentro do `if`, então cancelar
+    de novo não avisa o síndico duas vezes — e o morador ainda ouve resposta.
+    """
+    async with conn.transaction():
+        cancelada = await cancelar_reserva(
+            conn,
+            reserva_id=item.id,
+            telefone=conversa.telefone,
+            condominio_id=conversa.condominio_id,
+        )
+        if cancelada is not None:
+            await enfileirar_aviso_cancelamento(
+                conn,
+                condominio_id=conversa.condominio_id,
+                reserva_id=cancelada,
+                texto=renderizar(
+                    MensagemSindico.AVISO_CANCELAMENTO,
+                    identificador=_identificador(cancelada),
+                    area=item.area,
+                    dia=item.dia,
+                    telefone_morador=conversa.telefone,
+                ),
+            )
+
+    if cancelada is None:
+        return (
+            renderizar(MensagemMinhasReservas.JA_NAO_ATIVA),
+            Transicao.para_menu(conversa.condominio_id),
+        )
+
+    logger.info("reserva cancelada: id=%s conversa=%s", cancelada, conversa.id)
+    return (
+        renderizar(MensagemMinhasReservas.CANCELADA, area=item.area, dia=item.dia),
+        Transicao.para_menu(conversa.condominio_id),
+    )
 
 
 # ── wizard de ocorrência (Fase 4 · Etapa 4) ──────────────────────────────────

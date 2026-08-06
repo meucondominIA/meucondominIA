@@ -12,22 +12,32 @@ garantia (a lease), e separá-lo espalharia as invariantes da tabela.
 Nada aqui faz rede.
 """
 
+from enum import Enum
 from uuid import UUID
 
 import asyncpg
 from pydantic import BaseModel, ConfigDict
 
+
+class TipoAviso(str, Enum):
+    """Espelha chk_avisos_sindico_tipo. Mudar aqui exige migration."""
+
+    RESERVA_CRIADA = "reserva_criada"
+    RESERVA_CANCELADA = "reserva_cancelada"
+    OCORRENCIA_ABERTA = "ocorrencia_aberta"
+
+
 _ENFILEIRAR_RESERVA = """
-    insert into avisos_sindico (condominio_id, reserva_id, texto)
-    values ($1, $2, $3)
-    on conflict (reserva_id) where reserva_id is not null
+    insert into avisos_sindico (condominio_id, reserva_id, tipo, texto)
+    values ($1, $2, $3, $4)
+    on conflict (reserva_id, tipo) where reserva_id is not null
     do nothing
 """
 
 _ENFILEIRAR_OCORRENCIA = """
-    insert into avisos_sindico (condominio_id, solicitacao_id, texto)
-    values ($1, $2, $3)
-    on conflict (solicitacao_id) where solicitacao_id is not null
+    insert into avisos_sindico (condominio_id, solicitacao_id, tipo, texto)
+    values ($1, $2, $3, $4)
+    on conflict (solicitacao_id, tipo) where solicitacao_id is not null
     do nothing
 """
 
@@ -41,23 +51,26 @@ _ENFILEIRAR_OCORRENCIA = """
 # sindico_telefone not null: tenant sem síndico não entra no lote; o aviso fica
 #   represado e sai sozinho quando o número for cadastrado.
 _RESERVAR_LOTE = """
-    update avisos_sindico a
-       set reservado_ate = now() + make_interval(secs => $1),
-           tentativas = tentativas + 1
-      from condominios c
-     where c.id = a.condominio_id
-       and a.id in (
-             select a2.id
-               from avisos_sindico a2
-               join condominios c2 on c2.id = a2.condominio_id
-              where a2.status = 'pendente'
-                and (a2.reservado_ate is null or a2.reservado_ate < now())
-                and c2.sindico_telefone is not null
-              order by a2.created_at
-              limit $2
-                for update of a2 skip locked
-           )
-    returning a.id, a.texto, c.sindico_telefone as telefone
+    with reservados as (
+        update avisos_sindico a
+           set reservado_ate = now() + make_interval(secs => $1),
+               tentativas = tentativas + 1
+          from condominios c
+         where c.id = a.condominio_id
+           and a.id in (
+                 select a2.id
+                   from avisos_sindico a2
+                   join condominios c2 on c2.id = a2.condominio_id
+                  where a2.status = 'pendente'
+                    and (a2.reservado_ate is null or a2.reservado_ate < now())
+                    and c2.sindico_telefone is not null
+                  order by a2.created_at
+                  limit $2
+                    for update of a2 skip locked
+               )
+        returning a.id, a.texto, a.created_at, c.sindico_telefone as telefone
+    )
+    select id, texto, telefone from reservados order by created_at
 """
 
 _MARCAR_ENVIADO = """
@@ -88,14 +101,39 @@ async def enfileirar_aviso_reserva(
     Reprocessamento vira DO NOTHING no uq_avisos_sindico_reserva; o texto do
     primeiro aviso é preservado.
     """
-    await conn.execute(_ENFILEIRAR_RESERVA, condominio_id, reserva_id, texto)
+    await conn.execute(
+        _ENFILEIRAR_RESERVA,
+        condominio_id,
+        reserva_id,
+        TipoAviso.RESERVA_CRIADA.value,
+        texto,
+    )
+
+
+async def enfileirar_aviso_cancelamento(
+    conn: asyncpg.Connection, *, condominio_id: UUID, reserva_id: UUID, texto: str
+) -> None:
+    """O segundo aviso da MESMA reserva. Chamar na TX do cancelamento."""
+    await conn.execute(
+        _ENFILEIRAR_RESERVA,
+        condominio_id,
+        reserva_id,
+        TipoAviso.RESERVA_CANCELADA.value,
+        texto,
+    )
 
 
 async def enfileirar_aviso_ocorrencia(
     conn: asyncpg.Connection, *, condominio_id: UUID, solicitacao_id: UUID, texto: str
 ) -> None:
     """Irmã da de reserva, no outro unique parcial."""
-    await conn.execute(_ENFILEIRAR_OCORRENCIA, condominio_id, solicitacao_id, texto)
+    await conn.execute(
+        _ENFILEIRAR_OCORRENCIA,
+        condominio_id,
+        solicitacao_id,
+        TipoAviso.OCORRENCIA_ABERTA.value,
+        texto,
+    )
 
 
 async def reservar_lote(

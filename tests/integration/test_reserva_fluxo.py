@@ -4,7 +4,7 @@ Payload REAL do Z-PRO atravessa parse → processador → roteador → motor →
 real, com o ENVIO mockado e ZERO chamada de IA (o wizard nunca passa pela
 geração). O que se prova aqui e não nos unitários: que o rascunho sobrevive no
 jsonb entre mensagens, que os dois CHECKs aceitam cada transição do wizard, que
-a reserva cai como 'pendente' no tenant certo com os instantes do fuso do
+a reserva cai como 'aprovada' no tenant certo com os instantes do fuso do
 condomínio, e que reprocessar a mesma mensagem NÃO duplica a reserva.
 
 Pool real (não rodar_tx): o processador commita as próprias transações.
@@ -112,7 +112,7 @@ class _Ambiente:
     async def avisos(self) -> list[asyncpg.Record]:
         async with self.pool.acquire() as conn:
             return await conn.fetch(
-                "select a.status, a.texto, a.reserva_id, c.sindico_telefone "
+                "select a.status, a.tipo, a.texto, a.reserva_id, c.sindico_telefone "
                 "from avisos_sindico a "
                 "join condominios c on c.id = a.condominio_id order by a.created_at"
             )
@@ -192,7 +192,7 @@ def _hoje() -> "datetime.date":
 # ── o caminho do MARCO ───────────────────────────────────────────────────────
 
 
-def test_reserva_ponta_a_ponta_cai_como_pendente(ambiente):
+def test_reserva_ponta_a_ponta_cai_como_confirmada(ambiente):
     async def passos(a: _Ambiente):
         await _ate_o_menu(a)
 
@@ -216,7 +216,7 @@ def test_reserva_ponta_a_ponta_cai_como_pendente(ambiente):
         assert linha["rascunho"]["dia"] == escolhido
 
         pronto = await a.entregar("1")
-        assert "Registrei seu pedido" in pronto
+        assert "Sua reserva está confirmada" in pronto
 
         # o wizard terminou: volta ao menu e a sacola some (chk_conversas_rascunho)
         linha = await a.conversa()
@@ -224,7 +224,7 @@ def test_reserva_ponta_a_ponta_cai_como_pendente(ambiente):
         assert linha["rascunho"] is None
 
         (reserva,) = await a.reservas()
-        assert reserva["status"] == "pendente"
+        assert reserva["status"] == "aprovada"
         assert reserva["slug"] == "res-gabro"
         assert reserva["area"] == "Salão de Festas"
         assert reserva["telefone"] == NUMERO
@@ -238,7 +238,7 @@ def test_reserva_ponta_a_ponta_cai_como_pendente(ambiente):
         (aviso,) = await a.avisos()
         assert aviso["reserva_id"] == reserva["id"]
         assert aviso["status"] == "pendente"
-        assert aviso["texto"].startswith(f"Reserva #{reserva['id'].hex[:8]}")
+        assert aviso["texto"].startswith(f"Nova reserva #{reserva['id'].hex[:8]}")
         assert "Salão de Festas" in aviso["texto"]
         assert NUMERO in aviso["texto"]
         # D5: informativo, sem máquina de aprovação por WhatsApp
@@ -285,7 +285,7 @@ def test_reprocessar_a_confirmacao_nao_duplica_a_reserva(ambiente):
         assert len(depois) == 1, "reprocessamento duplicou a reserva"
         assert depois[0]["origem_mensagem_id"] == antes["origem_mensagem_id"]
         assert envios == 1  # respondeu de novo, mas gravou a MESMA reserva
-        assert "Registrei seu pedido" in a.enviados[-1]
+        assert "Sua reserva está confirmada" in a.enviados[-1]
 
     ambiente(passos)
 
@@ -413,5 +413,135 @@ def test_condominio_sem_area_reservavel_nao_prende(ambiente):
         assert "não tem área para reservar" in texto
         linha = await a.conversa()
         assert linha["estado"] == "menu" and linha["rascunho"] is None
+
+    ambiente(passos)
+
+
+# ── minhas reservas e o cancelamento ─────────────────────────────────────────
+
+
+async def _reservar_o_primeiro_dia(a: "_Ambiente") -> str:
+    """Do menu até a reserva confirmada; devolve o dia (ISO) que foi escolhido."""
+    await a.entregar("2")
+    await a.entregar("1")
+    linha = await a.conversa()
+    escolhido = linha["rascunho"]["opcoes"][0]
+    await a.entregar("1")
+    await a.entregar("1")
+    return escolhido
+
+
+def test_cancelar_ponta_a_ponta_libera_o_dia_e_avisa_o_sindico(ambiente):
+    """As duas metades da etapa numa história só: confirma, desfaz, e o dia
+    volta a ser ofertável — com os DOIS avisos citando o MESMO identificador."""
+
+    async def passos(a: _Ambiente):
+        await _ate_o_menu(a)
+        dia = await _reservar_o_primeiro_dia(a)
+
+        lista = await a.entregar("5")
+        assert "Suas reservas:" in lista
+        assert "1 - Salão de Festas" in lista
+        linha = await a.conversa()
+        assert linha["estado"] == "minhas_reservas"
+        assert linha["rascunho"]["passo"] == "lista"
+        assert len(linha["rascunho"]["opcoes"]) == 1
+
+        confirmar = await a.entregar("1")
+        assert "Cancelar esta reserva?" in confirmar
+        linha = await a.conversa()
+        assert linha["rascunho"]["passo"] == "confirmacao"
+        assert linha["rascunho"]["item"]["dia"] == dia
+
+        pronto = await a.entregar("1")
+        assert "cancelei sua reserva" in pronto
+        assert "O dia voltou a ficar livre." in pronto
+
+        linha = await a.conversa()
+        assert linha["estado"] == "menu"
+        assert linha["rascunho"] is None
+
+        (reserva,) = await a.reservas()
+        assert reserva["status"] == "cancelada"
+
+        criado, cancelado = await a.avisos()
+        assert (criado["tipo"], cancelado["tipo"]) == (
+            "reserva_criada",
+            "reserva_cancelada",
+        )
+        assert criado["reserva_id"] == cancelado["reserva_id"] == reserva["id"]
+        curto = reserva["id"].hex[:8]
+        assert criado["texto"].startswith(f"Nova reserva #{curto}")
+        assert cancelado["texto"].startswith(f"Reserva cancelada #{curto}")
+
+        # o dia voltou para a oferta: a EXCLUDE só olha 'aprovada'
+        await a.entregar("2")
+        await a.entregar("1")
+        assert dia in (await a.conversa())["rascunho"]["opcoes"]
+
+        assert set(await a.respostas_por_entrada()) == {1}
+        assert a.geracoes == []
+
+    ambiente(passos)
+
+
+def test_menu_5_sem_reserva_viva_responde_e_volta_ao_menu(ambiente):
+    async def passos(a: _Ambiente):
+        await _ate_o_menu(a)
+
+        vazio = await a.entregar("5")
+        assert "não tem reserva ativa" in vazio
+        assert "Como posso ajudar?" in vazio
+
+        linha = await a.conversa()
+        assert linha["estado"] == "menu"
+        assert linha["rascunho"] is None
+        assert await a.avisos() == []
+
+    ambiente(passos)
+
+
+def test_reserva_morta_debaixo_do_rascunho_responde_ja_nao_ativa(ambiente):
+    """O morador segura a tela de confirmação e a reserva some por fora. O
+    rascunho congelado aponta para uma linha que já não é cancelável: uma
+    resposta, e NENHUM segundo aviso ao síndico."""
+
+    async def passos(a: _Ambiente):
+        await _ate_o_menu(a)
+        await _reservar_o_primeiro_dia(a)
+
+        await a.entregar("5")
+        await a.entregar("1")
+        linha = await a.conversa()
+        assert linha["rascunho"]["passo"] == "confirmacao"
+
+        async with a.pool.acquire() as conn:
+            await conn.execute("update reservas set status = 'cancelada'")
+
+        resposta = await a.entregar("1")
+        assert "já não está ativa" in resposta
+
+        linha = await a.conversa()
+        assert linha["estado"] == "menu"
+        assert [av["tipo"] for av in await a.avisos()] == ["reserva_criada"]
+
+    ambiente(passos)
+
+
+def test_escape_dentro_de_minhas_reservas_nao_cancela_nada(ambiente):
+    async def passos(a: _Ambiente):
+        await _ate_o_menu(a)
+        await _reservar_o_primeiro_dia(a)
+
+        await a.entregar("5")
+        await a.entregar("1")
+        saiu = await a.entregar("0")
+
+        assert "não cancelei nada" in saiu
+        linha = await a.conversa()
+        assert linha["estado"] == "menu" and linha["rascunho"] is None
+        (reserva,) = await a.reservas()
+        assert reserva["status"] == "aprovada"
+        assert [av["tipo"] for av in await a.avisos()] == ["reserva_criada"]
 
     ambiente(passos)

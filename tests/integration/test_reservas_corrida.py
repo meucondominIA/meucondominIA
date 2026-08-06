@@ -15,7 +15,7 @@ from datetime import date
 import asyncpg
 import pytest
 
-from reservas import criar_reserva_pendente
+from reservas import confirmar_reserva
 
 pytestmark = pytest.mark.integration
 
@@ -132,47 +132,50 @@ def test_a_segunda_aprovada_vence_quando_a_primeira_faz_rollback(rodar_concorren
     rodar_concorrente(body)
 
 
-def test_dois_pendentes_concorrentes_passam_os_dois(rodar_concorrente):
-    """O LIMITE do NOT EXISTS: sob READ COMMITTED cada transação não enxerga a
-    linha não-commitada da outra. Cortesia contra o morador lento, não contra o
-    clique simultâneo — é a camada 3 (a EXCLUDE) que garante, na aprovação."""
+def test_duas_confirmacoes_concorrentes_uma_vence_e_a_outra_leva_23p01(
+    rodar_concorrente,
+):
+    """O caminho de produção, não o SQL cru: o NOT EXISTS não vê a linha não
+    commitada da outra (READ COMMITTED), então as duas chegam na constraint e
+    quem decide é o banco. A perdedora não devolve None — ela levanta."""
 
     async def body(abrir):
         observador = await abrir()
-        cond, area = await _cenario(observador, "corrida-pendentes")
+        cond, area = await _cenario(observador, "corrida-confirmacoes")
         msg_a = await _mensagem(observador, "5555990015001")
         msg_b = await _mensagem(observador, "5555990015002")
 
         primeira, segunda = await abrir(), await abrir()
+        pid_segunda = await segunda.fetchval("select pg_backend_pid()")
         tx_primeira, tx_segunda = primeira.transaction(), segunda.transaction()
         await tx_primeira.start()
         await tx_segunda.start()
 
-        na_primeira = await criar_reserva_pendente(
-            primeira,
-            condominio_id=cond,
-            area_id=area,
-            dia=DIA,
-            tz=TZ,
-            telefone="5555990015001",
-            origem_mensagem_id=msg_a,
+        pedido = dict(condominio_id=cond, area_id=area, dia=DIA, tz=TZ)
+        na_primeira = await confirmar_reserva(
+            primeira, telefone="5555990015001", origem_mensagem_id=msg_a, **pedido
         )
-        na_segunda = await criar_reserva_pendente(
-            segunda,
-            condominio_id=cond,
-            area_id=area,
-            dia=DIA,
-            tz=TZ,
-            telefone="5555990015002",
-            origem_mensagem_id=msg_b,
+        tentativa = asyncio.create_task(
+            confirmar_reserva(
+                segunda, telefone="5555990015002", origem_mensagem_id=msg_b, **pedido
+            )
         )
-        await tx_primeira.commit()
-        await tx_segunda.commit()
+        espera = await _espera_bloqueio(observador, pid_segunda)
+        assert not tentativa.done()
+        assert (espera["wait_event_type"], espera["wait_event"]) == (
+            "Lock",
+            "transactionid",
+        )
 
-        pendentes = await observador.fetchval(
-            "select count(*) from reservas where status = 'pendente'"
-        )
-        assert na_primeira is not None and na_segunda is not None
-        assert pendentes == 2
+        await tx_primeira.commit()
+        with pytest.raises(asyncpg.ExclusionViolationError) as erro:
+            await tentativa
+        assert erro.value.sqlstate == "23P01"
+        await tx_segunda.rollback()
+
+        assert na_primeira is not None
+        assert await observador.fetchval(
+            "select count(*) from reservas where status = 'aprovada'"
+        ) == 1
 
     rodar_concorrente(body)

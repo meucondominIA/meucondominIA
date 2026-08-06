@@ -1,7 +1,7 @@
 """Repositório de solicitações — a escrita da ocorrência (asyncpg; recebe conn,
 como reservas.py).
 
-Uma diferença de domínio, escrita no tipo: criar_reserva_pendente devolve
+Uma diferença de domínio, escrita no tipo: confirmar_reserva devolve
 `UUID | None` porque o dia pode ter sido tomado no meio do caminho. A ocorrência
 não tem estado de disponibilidade — é sempre criável —, então aqui é `UUID` e a
 casca não ganha ramo de "não deu". O único caminho que não insere é o

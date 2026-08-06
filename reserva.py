@@ -60,7 +60,7 @@ class MensagemReserva(str, Enum):
     DATA_TOMADA = "reserva_data_tomada"
     CONFIRMAR = "reserva_confirmar"
     CONFIRMACAO_NAO_ENTENDIDA = "reserva_confirmacao_nao_entendida"
-    RESERVA_REGISTRADA = "reserva_registrada"
+    RESERVA_CONFIRMADA = "reserva_confirmada"
 
 
 class _Rascunho(BaseModel):
@@ -142,7 +142,7 @@ class MostrarDias(BaseModel):
 
 
 class Concluir(BaseModel):
-    """Descritor de I/O: a casca transforma em criar_reserva_pendente.
+    """Descritor de I/O: a casca transforma em confirmar_reserva.
 
     Só o dia e a área: tenant, fuso e telefone são da conversa, não da escolha.
     """

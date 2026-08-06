@@ -14,13 +14,15 @@ import asyncpg
 import pytest
 
 from avisos import (
+    TipoAviso,
+    enfileirar_aviso_cancelamento,
     enfileirar_aviso_ocorrencia,
     enfileirar_aviso_reserva,
     marcar_enviado,
     reservar_lote,
 )
 from ocorrencia import TipoSolicitacao
-from reservas import criar_reserva_pendente
+from reservas import confirmar_reserva
 from solicitacoes import criar_solicitacao
 
 pytestmark = pytest.mark.integration
@@ -62,7 +64,7 @@ async def _entrada(conn, mid, telefone="5511"):
 async def _reserva_com_aviso(conn, *, cond, area, origem, dia=DIA, telefone="5511"):
     """O gancho de atendimento._gravar: a TX amarra pedido e intenção."""
     async with conn.transaction():
-        rid = await criar_reserva_pendente(
+        rid = await confirmar_reserva(
             conn,
             condominio_id=cond,
             area_id=area,
@@ -129,7 +131,7 @@ def test_crash_na_tx_desfaz_pedido_E_intencao(rodar_tx):
 
         with pytest.raises(RuntimeError):
             async with conn.transaction():
-                rid = await criar_reserva_pendente(
+                rid = await confirmar_reserva(
                     conn, condominio_id=cond, area_id=area, dia=DIA, tz=TZ,
                     telefone="5511", origem_mensagem_id=origem,
                 )
@@ -201,7 +203,7 @@ def test_o_replay_preserva_o_texto_do_primeiro_aviso(rodar_tx):
 
 
 def test_dia_tomado_nao_enfileira_aviso(rodar_tx):
-    """criar_reserva_pendente devolve None: não há pedido a avisar."""
+    """confirmar_reserva devolve None: não há pedido a avisar."""
 
     async def corpo(conn):
         cond = await _cond(conn, "gabro", "5555992372732")
@@ -219,8 +221,18 @@ def test_dia_tomado_nao_enfileira_aviso(rodar_tx):
     rodar_tx(corpo)
 
 
-@pytest.mark.parametrize("rotulo", ["nenhum pedido", "os dois pedidos"])
-def test_check_recusa_linha_sem_pedido_ou_com_dois(rodar_tx, rotulo):
+@pytest.mark.parametrize(
+    "rotulo, aceitas",
+    [
+        ("nenhum pedido", {"chk_avisos_sindico_um_pedido",
+                           "chk_avisos_sindico_tipo_coerente"}),
+        ("os dois pedidos", {"chk_avisos_sindico_um_pedido"}),
+    ],
+)
+def test_check_recusa_linha_sem_pedido_ou_com_dois(rodar_tx, rotulo, aceitas):
+    """Sem nenhum id as DUAS CHECKs são violadas e qual delas o Postgres reporta
+    não é garantido; com os dois preenchidos só a um_pedido morde."""
+
     async def corpo(conn):
         cond = await _cond(conn, "gabro", "5555992372732")
         area = await _area(conn, cond)
@@ -235,10 +247,104 @@ def test_check_recusa_linha_sem_pedido_ou_com_dois(rodar_tx, rotulo):
         with pytest.raises(asyncpg.CheckViolationError) as erro:
             await conn.execute(
                 "insert into avisos_sindico (condominio_id, reserva_id, "
-                "solicitacao_id, texto) values ($1,$2,$3,'x')",
+                "solicitacao_id, tipo, texto) values ($1,$2,$3,'reserva_criada','x')",
                 cond, *alvo,
             )
-        assert erro.value.constraint_name == "chk_avisos_sindico_um_pedido"
+        assert erro.value.constraint_name in aceitas
+
+    rodar_tx(corpo)
+
+
+@pytest.mark.parametrize(
+    "tipo", [TipoAviso.OCORRENCIA_ABERTA.value, TipoAviso.RESERVA_CRIADA.value]
+)
+def test_check_recusa_tipo_que_nao_fala_do_id_preenchido(rodar_tx, tipo):
+    async def corpo(conn):
+        cond = await _cond(conn, "gabro", "5555992372732")
+        area = await _area(conn, cond)
+        rid = await _reserva_com_aviso(
+            conn, cond=cond, area=area, origem=await _entrada(conn, "M1")
+        )
+        sid = await _ocorrencia_com_aviso(
+            conn, cond=cond, origem=await _entrada(conn, "M2", "5512")
+        )
+        alvo = (
+            ("reserva_id", rid)
+            if tipo == TipoAviso.OCORRENCIA_ABERTA.value
+            else ("solicitacao_id", sid)
+        )
+
+        with pytest.raises(asyncpg.CheckViolationError) as erro:
+            await conn.execute(
+                f"insert into avisos_sindico (condominio_id, {alvo[0]}, tipo, texto) "
+                "values ($1,$2,$3,'x')",
+                cond, alvo[1], tipo,
+            )
+        assert erro.value.constraint_name == "chk_avisos_sindico_tipo_coerente"
+
+    rodar_tx(corpo)
+
+
+def test_a_mesma_reserva_aceita_os_dois_tipos_e_recusa_o_terceiro(rodar_tx):
+    async def corpo(conn):
+        cond = await _cond(conn, "gabro", "5555992372732")
+        area = await _area(conn, cond)
+        rid = await _reserva_com_aviso(
+            conn, cond=cond, area=area, origem=await _entrada(conn, "M1")
+        )
+        await enfileirar_aviso_cancelamento(
+            conn, condominio_id=cond, reserva_id=rid, texto="Reserva cancelada"
+        )
+
+        tipos = [
+            r["tipo"]
+            for r in await conn.fetch(
+                "select tipo from avisos_sindico where reserva_id = $1 order by tipo",
+                rid,
+            )
+        ]
+        assert tipos == ["reserva_cancelada", "reserva_criada"]
+
+        await enfileirar_aviso_cancelamento(
+            conn, condominio_id=cond, reserva_id=rid, texto="outro texto"
+        )
+        assert await conn.fetchval(
+            "select count(*) from avisos_sindico where reserva_id = $1", rid
+        ) == 2
+
+        with pytest.raises(asyncpg.UniqueViolationError):
+            await conn.execute(
+                "insert into avisos_sindico (condominio_id, reserva_id, tipo, texto) "
+                "values ($1,$2,'reserva_cancelada','sem on conflict')",
+                cond, rid,
+            )
+
+    rodar_tx(corpo)
+
+
+def test_o_lote_sai_na_ordem_em_que_foi_enfileirado(rodar_tx):
+    """O RETURNING de um UPDATE não tem ordem (queries-order.html): sem o SELECT
+    externo o síndico lê o cancelamento antes da reserva que o gerou."""
+
+    async def corpo(conn):
+        cond = await _cond(conn, "gabro", "5555992372732")
+        area = await _area(conn, cond)
+        for n in range(8):
+            rid = await _reserva_com_aviso(
+                conn,
+                cond=cond,
+                area=area,
+                origem=await _entrada(conn, f"M{n}", f"55{n}"),
+                dia=DIA + timedelta(days=n),
+            )
+            await conn.execute(
+                "update avisos_sindico set texto = $2, "
+                "created_at = now() + make_interval(secs => $3) where reserva_id = $1",
+                rid, f"MSG-{n}", float(n),
+            )
+
+        lote = await reservar_lote(conn, lease_segundos=60.0, limite=20)
+        assert [a.texto for a in lote] == [f"MSG-{n}" for n in range(8)]
 
     rodar_tx(corpo)
 

@@ -15,6 +15,7 @@ from enum import Enum
 
 from areas import AreaReservavel
 from condominios import CondominioElegivel
+from minhas_reservas import MensagemMinhasReservas
 from ocorrencia import (
     MAX_DESCRICAO,
     SEGUIR_SEM_FOTO,
@@ -23,6 +24,7 @@ from ocorrencia import (
     TipoSolicitacao,
 )
 from reserva import VER_MAIS, MensagemReserva, PaginaDias
+from reservas import ReservaDoMorador
 from roteador import Mensagem, OpcaoMenu
 
 
@@ -41,6 +43,7 @@ class MensagemSindico(str, Enum):
     """
 
     AVISO_RESERVA = "aviso_reserva"
+    AVISO_CANCELAMENTO = "aviso_cancelamento"
     AVISO_OCORRENCIA = "aviso_ocorrencia"
     SEM_CANAL = "sem_canal"
 
@@ -51,6 +54,7 @@ Identidade = (
     | MensagemSindico
     | MensagemReserva
     | MensagemOcorrencia
+    | MensagemMinhasReservas
 )
 
 _TIPOS_OCORRENCIA = {
@@ -64,6 +68,7 @@ _ROTULOS = {
     OpcaoMenu.RESERVA: "Reservar área comum",
     OpcaoMenu.OCORRENCIA: "Abrir ocorrência",
     OpcaoMenu.SINDICO: "Falar com o síndico",
+    OpcaoMenu.MINHAS_RESERVAS: "Minhas reservas",
     OpcaoMenu.TROCAR_CONDOMINIO: "Não sou desse condomínio",
 }
 
@@ -88,7 +93,11 @@ _TELA_TIPOS = "\n".join(
 
 # Na reserva o "não" e o escape levam ao mesmo lugar, então a opção diz os dois.
 _SIM_NAO_RESERVA = "1 - Sim\n2 - Não, voltar ao menu"
+_SIM_NAO_CANCELAR = "1 - Sim, cancelar\n2 - Não, voltar ao menu"
 _VOLTAR = "0 - Voltar ao menu"
+
+_TRANSPARENCIA_RESERVA = "O síndico recebe seu número e esta reserva."
+_DIA_LIBERADO = "O dia voltou a ficar livre."
 
 # strftime("%a") devolve 'Sat': o locale do container é C.UTF-8 e pt_BR não está
 # instalado (medido 27/07/2026). Tupla explícita, indexada por weekday().
@@ -134,6 +143,13 @@ _CONSTANTES: dict[Identidade, str] = {
     ),
     Mensagem.NADA_AGENDADO: f"Ok, não agendei nada.\n\n{_MENU}",
     Mensagem.NADA_REGISTRADO: f"Ok, não registrei nada.\n\n{_MENU}",
+    Mensagem.NADA_CANCELADO: f"Ok, não cancelei nada.\n\n{_MENU}",
+    MensagemMinhasReservas.SEM_RESERVAS: (
+        f"Você não tem reserva ativa por aqui.\n\n{_MENU}"
+    ),
+    MensagemMinhasReservas.JA_NAO_ATIVA: (
+        f"Essa reserva já não está ativa.\n\n{_MENU}"
+    ),
     MensagemReserva.SEM_AREAS: (
         f"Esse condomínio ainda não tem área para reservar por aqui.\n\n{_MENU}"
     ),
@@ -211,6 +227,18 @@ def _tela_confirmar(area: str, dia: date) -> str:
     return f"Confirmar a reserva?\n\n{area}\n{_longo(dia)}\n\n{_SIM_NAO_RESERVA}"
 
 
+def _tela_minhas(reservas: Sequence[ReservaDoMorador]) -> str:
+    linhas = _numerar([f"{r.area} — {_curto(r.dia)}" for r in reservas])
+    return (
+        f"Suas reservas:\n\n{linhas}\n\n"
+        f"Responda com o número para cancelar.\n{_VOLTAR}"
+    )
+
+
+def _tela_cancelar(area: str, dia: date) -> str:
+    return f"Cancelar esta reserva?\n\n{area}\n{_longo(dia)}\n\n{_SIM_NAO_CANCELAR}"
+
+
 def _resumo_ocorrencia(tipo: TipoSolicitacao, descricao: str,
                        anexos: Sequence[Anexo]) -> str:
     """O que a confirmação recita. Sem anexo a linha some — não anunciamos vazio."""
@@ -231,6 +259,7 @@ def renderizar(
     pagina: PaginaDias | None = None,
     dia: date | None = None,
     aviso: MensagemReserva | None = None,
+    reservas: Sequence[ReservaDoMorador] = (),
     tipo: TipoSolicitacao | None = None,
     descricao: str | None = None,
     anexos: Sequence[Anexo] = (),
@@ -275,12 +304,34 @@ def renderizar(
                 _exigir(area, "o nome da área"), _exigir(dia, "a data")
             )
             return f"Só preciso de 1 ou 2.\n\n{corpo}"
-        case MensagemReserva.RESERVA_REGISTRADA:
+        case MensagemReserva.RESERVA_CONFIRMADA:
             return (
-                "Pronto! Registrei seu pedido:\n\n"
+                "Pronto! Sua reserva está confirmada:\n\n"
                 f"{_exigir(area, 'o nome da área')}\n{_longo(_exigir(dia, 'a data'))}"
-                f"\n\nEstá pendente de aprovação do síndico.\n{_TRANSPARENCIA}"
-                f"\n\n{_MENU}"
+                f"\n\nSe precisar desmarcar, escolha "
+                f"{OpcaoMenu.MINHAS_RESERVAS.value} - "
+                f"{_ROTULOS[OpcaoMenu.MINHAS_RESERVAS]}."
+                f"\n{_TRANSPARENCIA_RESERVA}\n\n{_MENU}"
+            )
+        case MensagemMinhasReservas.LISTA:
+            return _tela_minhas(_exigir(reservas, "a lista de reservas"))
+        case MensagemMinhasReservas.RESERVA_NAO_ENTENDIDA:
+            corpo = _tela_minhas(_exigir(reservas, "a lista de reservas"))
+            return f"Não tenho essa reserva.\n\n{corpo}"
+        case MensagemMinhasReservas.CONFIRMAR:
+            return _tela_cancelar(
+                _exigir(area, "o nome da área"), _exigir(dia, "a data")
+            )
+        case MensagemMinhasReservas.CONFIRMACAO_NAO_ENTENDIDA:
+            corpo = _tela_cancelar(
+                _exigir(area, "o nome da área"), _exigir(dia, "a data")
+            )
+            return f"Só preciso de 1 ou 2.\n\n{corpo}"
+        case MensagemMinhasReservas.CANCELADA:
+            return (
+                "Pronto, cancelei sua reserva:\n\n"
+                f"{_exigir(area, 'o nome da área')}\n{_longo(_exigir(dia, 'a data'))}"
+                f"\n\n{_DIA_LIBERADO}\n\n{_MENU}"
             )
         case MensagemOcorrencia.CONFIRMAR:
             return (
@@ -299,11 +350,18 @@ def renderizar(
             )
         case MensagemSindico.AVISO_RESERVA:
             return (
-                f"Reserva #{_exigir(identificador, 'o identificador')}\n\n"
+                f"Nova reserva #{_exigir(identificador, 'o identificador')}\n\n"
+                f"{_exigir(area, 'o nome da área')}\n"
+                f"{_longo(_exigir(dia, 'a data'))}\n\n"
+                f"Morador: {_exigir(telefone_morador, 'o telefone do morador')}"
+            )
+        case MensagemSindico.AVISO_CANCELAMENTO:
+            return (
+                f"Reserva cancelada #{_exigir(identificador, 'o identificador')}\n\n"
                 f"{_exigir(area, 'o nome da área')}\n"
                 f"{_longo(_exigir(dia, 'a data'))}\n\n"
                 f"Morador: {_exigir(telefone_morador, 'o telefone do morador')}\n\n"
-                "Pendente de aprovação no painel."
+                f"{_DIA_LIBERADO}"
             )
         case MensagemSindico.AVISO_OCORRENCIA:
             return (

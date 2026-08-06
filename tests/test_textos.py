@@ -13,7 +13,9 @@ import pytest
 from areas import AreaReservavel
 from condominios import CondominioElegivel
 from ocorrencia import Anexo, MensagemOcorrencia, TipoSolicitacao
+from minhas_reservas import MensagemMinhasReservas
 from reserva import MensagemReserva, montar_pagina
+from reservas import ReservaDoMorador
 from roteador import Mensagem, OpcaoMenu
 from textos import MensagemAtendimento, MensagemSindico, renderizar
 
@@ -23,6 +25,11 @@ LISTA = [
 ]
 AREAS = [AreaReservavel(id=uuid4(), nome="Salão de Festas")]
 PAGINA = montar_pagina([date(2026, 8, d) for d in range(1, 16)], pagina=0)
+
+MINHAS = [
+    ReservaDoMorador(id=uuid4(), area="Salão de Festas", dia=date(2026, 8, 12)),
+    ReservaDoMorador(id=uuid4(), area="Salão de Festas", dia=date(2026, 8, 22)),
+]
 
 ANEXO = Anexo(
     bucket="anexos",
@@ -42,6 +49,7 @@ _CONTEXTO = dict(
     tipo=TipoSolicitacao.RECLAMACAO,
     descricao="Vazamento no 3º andar",
     anexos=[ANEXO],
+    reservas=MINHAS,
 )
 
 _SEM_CONTEXTO = [
@@ -52,6 +60,9 @@ _SEM_CONTEXTO = [
     Mensagem.PERGUNTA_VAZIA,
     Mensagem.SO_ENTENDO_TEXTO,
     Mensagem.NADA_AGENDADO,
+    Mensagem.NADA_CANCELADO,
+    MensagemMinhasReservas.SEM_RESERVAS,
+    MensagemMinhasReservas.JA_NAO_ATIVA,
     MensagemAtendimento.CONTINGENCIA,
     MensagemAtendimento.SEM_CONDOMINIOS,
     MensagemReserva.SEM_AREAS,
@@ -68,6 +79,7 @@ def _todas_as_identidades():
         + list(MensagemAtendimento)
         + list(MensagemReserva)
         + list(MensagemOcorrencia)
+        + list(MensagemMinhasReservas)
         if i not in _PREFIXO
     ]
 
@@ -87,6 +99,7 @@ def test_identidades_nao_colidem_entre_os_enums():
         + list(MensagemAtendimento)
         + list(MensagemReserva)
         + list(MensagemOcorrencia)
+        + list(MensagemMinhasReservas)
     ]
     assert len(valores) == len(set(valores))
 
@@ -131,9 +144,10 @@ def test_menu_lista_os_rotulos_na_ordem_do_enum():
     for opcao in OpcaoMenu:
         assert f"{opcao.value} -" in texto
     assert "1 - Tirar dúvidas sobre o condomínio" in texto
+    assert "5 - Minhas reservas" in texto
     assert "9 - Não sou desse condomínio" in texto
-    # 5..8 não têm dono: não aparecem no menu
-    for reservado in ("5 -", "6 -", "7 -", "8 -"):
+    # 6..8 seguem sem dono: não aparecem no menu
+    for reservado in ("6 -", "7 -", "8 -"):
         assert reservado not in texto
 
 
@@ -215,10 +229,85 @@ def test_aviso_de_reserva_cita_tudo_que_o_sindico_precisa():
         dia=date(2026, 8, 8),
         telefone_morador="5555992372732",
     )
-    assert texto.startswith("Reserva #3f9a2b1c")
+    assert texto.startswith("Nova reserva #3f9a2b1c")
     assert "Salão de Festas" in texto
     assert "sábado, 08/08" in texto
     assert "5555992372732" in texto
+
+
+def test_aviso_de_cancelamento_diz_que_o_dia_voltou():
+    texto = renderizar(
+        MensagemSindico.AVISO_CANCELAMENTO,
+        identificador="3f9a2b1c",
+        area="Salão de Festas",
+        dia=date(2026, 8, 8),
+        telefone_morador="5555992372732",
+    )
+    assert texto.startswith("Reserva cancelada #3f9a2b1c")
+    assert "sábado, 08/08" in texto
+    assert "5555992372732" in texto
+    assert texto.endswith("O dia voltou a ficar livre.")
+
+
+def test_os_dois_avisos_da_mesma_reserva_se_distinguem_na_PRIMEIRA_linha():
+    """A notificação do WhatsApp mostra o começo: se a diferença ficasse no
+    rodapé, o síndico não saberia qual é qual sem abrir."""
+    contexto = dict(
+        identificador="3f9a2b1c",
+        area="Salão de Festas",
+        dia=date(2026, 8, 8),
+        telefone_morador="5555992372732",
+    )
+    nova = renderizar(MensagemSindico.AVISO_RESERVA, **contexto)
+    cancelada = renderizar(MensagemSindico.AVISO_CANCELAMENTO, **contexto)
+
+    assert nova.splitlines()[0] != cancelada.splitlines()[0]
+    assert "3f9a2b1c" in nova.splitlines()[0]
+    assert "3f9a2b1c" in cancelada.splitlines()[0]
+
+
+def test_nenhum_aviso_ao_sindico_promete_painel_ou_aprovacao():
+    """Não há painel nem aprovação; prometer qualquer um dos dois é mentira."""
+    contexto = dict(
+        identificador="3f9a2b1c",
+        area="Salão de Festas",
+        dia=date(2026, 8, 8),
+        telefone_morador="5555992372732",
+    )
+    for identidade in (
+        MensagemSindico.AVISO_RESERVA,
+        MensagemSindico.AVISO_CANCELAMENTO,
+    ):
+        texto = renderizar(identidade, **contexto).lower()
+        assert "painel" not in texto and "aprova" not in texto
+
+
+def test_confirmacao_ensina_o_caminho_do_cancelamento():
+    """A reserva vira irreversível neste instante: a saída tem que estar à vista."""
+    texto = renderizar(
+        MensagemReserva.RESERVA_CONFIRMADA, area="Salão", dia=date(2026, 8, 8)
+    )
+    assert "confirmada" in texto
+    assert f"{OpcaoMenu.MINHAS_RESERVAS.value} - Minhas reservas" in texto
+    assert "pendente" not in texto.lower()
+
+
+def test_lista_de_minhas_numera_a_partir_de_1_na_ordem_recebida():
+    texto = renderizar(MensagemMinhasReservas.LISTA, reservas=MINHAS)
+    assert "1 - Salão de Festas — qua 12/08" in texto
+    assert "2 - Salão de Festas — sáb 22/08" in texto
+    assert texto.index("1 - ") < texto.index("2 - ")
+    assert "0 - Voltar ao menu" in texto
+
+
+def test_tela_de_cancelar_recita_area_e_data_por_extenso():
+    """O cinto de segurança: o morador confirma sobre o que está lendo."""
+    texto = renderizar(
+        MensagemMinhasReservas.CONFIRMAR, area="Salão de Festas", dia=date(2026, 8, 8)
+    )
+    assert "Cancelar esta reserva?" in texto
+    assert "Salão de Festas" in texto and "sábado, 08/08" in texto
+    assert "1 - Sim, cancelar" in texto and "2 - Não, voltar ao menu" in texto
 
 
 def test_aviso_de_ocorrencia_reusa_o_resumo_do_morador():
@@ -288,7 +377,7 @@ def test_texto_da_borda_nao_promete_portal():
 @pytest.mark.parametrize(
     "identidade, extra",
     [
-        (MensagemReserva.RESERVA_REGISTRADA, {"area": "Salão", "dia": date(2026, 8, 8)}),
+        (MensagemReserva.RESERVA_CONFIRMADA, {"area": "Salão", "dia": date(2026, 8, 8)}),
         (
             MensagemOcorrencia.REGISTRADA,
             {"tipo": TipoSolicitacao.MANUTENCAO, "descricao": "vazou"},
@@ -298,4 +387,4 @@ def test_texto_da_borda_nao_promete_portal():
 def test_lgpd_o_morador_e_avisado_de_que_o_numero_vai_ao_sindico(identidade, extra):
     """Base legal é procedimento a pedido do titular: exige transparência."""
     texto = renderizar(identidade, **extra)
-    assert "O síndico recebe seu número e este pedido." in texto
+    assert "O síndico recebe seu número e est" in texto

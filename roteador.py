@@ -50,6 +50,7 @@ class Estado(str, Enum):
     DUVIDAS = "duvidas"
     RESERVA = "reserva"
     OCORRENCIA = "ocorrencia"
+    MINHAS_RESERVAS = "minhas_reservas"
 
 
 class Mensagem(str, Enum):
@@ -67,6 +68,7 @@ class Mensagem(str, Enum):
     SO_ENTENDO_TEXTO = "so_entendo_texto"
     NADA_AGENDADO = "nada_agendado"
     NADA_REGISTRADO = "nada_registrado"
+    NADA_CANCELADO = "nada_cancelado"
 
 
 ESCAPE = 0
@@ -88,6 +90,7 @@ class OpcaoMenu(IntEnum):
     RESERVA = 2
     OCORRENCIA = 3
     SINDICO = 4
+    MINHAS_RESERVAS = 5
     TROCAR_CONDOMINIO = 9
 
 
@@ -96,7 +99,13 @@ _INDISPONIVEIS = frozenset({OpcaoMenu.SINDICO})
 # Estados com tenant confirmado — mesmo ramo do chk_conversas_estado_coerente.
 # Fluxo esquecido aqui não reconfirma sessão expirada: escreve no tenant antigo.
 _COM_TENANT = frozenset(
-    {Estado.MENU, Estado.DUVIDAS, Estado.RESERVA, Estado.OCORRENCIA}
+    {
+        Estado.MENU,
+        Estado.DUVIDAS,
+        Estado.RESERVA,
+        Estado.OCORRENCIA,
+        Estado.MINHAS_RESERVAS,
+    }
 )
 
 # Onde imagem é entrada legítima. Fora daqui segue ouvindo SO_ENTENDO_TEXTO.
@@ -162,6 +171,15 @@ class Transicao(BaseModel):
     def para_ocorrencia(cls, condominio: UUID, rascunho: dict[str, Any]) -> Self:
         return cls(
             estado=Estado.OCORRENCIA,
+            condominio_id=condominio,
+            condominio_pendente=None,
+            rascunho=rascunho,
+        )
+
+    @classmethod
+    def para_minhas_reservas(cls, condominio: UUID, rascunho: dict[str, Any]) -> Self:
+        return cls(
+            estado=Estado.MINHAS_RESERVAS,
             condominio_id=condominio,
             condominio_pendente=None,
             rascunho=rascunho,
@@ -239,12 +257,24 @@ class DelegarOcorrencia(BaseModel):
     tem_foto: bool = False
 
 
+class DelegarMinhasReservas(BaseModel):
+    """O morador abriu ou avançou em "Minhas reservas"; quem interpreta é o motor.
+
+    Como o DelegarReserva: o roteador sabe que está DENTRO do fluxo, não onde.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    escolha: str
+
+
 Decisao = (
     Responder
     | DelegarIdentificacao
     | DelegarDuvida
     | DelegarReserva
     | DelegarOcorrencia
+    | DelegarMinhasReservas
 )
 
 
@@ -328,6 +358,8 @@ def rotear(
             return _reserva(conversa, texto)
         case Estado.OCORRENCIA:
             return _ocorrencia(conversa, tipo, texto)
+        case Estado.MINHAS_RESERVAS:
+            return _minhas_reservas(conversa, texto)
 
 
 def _identificacao(texto: str) -> Decisao:
@@ -403,6 +435,8 @@ def _menu(conversa: Conversa, texto: str) -> Decisao:
             return DelegarReserva(escolha=texto)
         case OpcaoMenu.OCORRENCIA:
             return DelegarOcorrencia(texto=texto)
+        case OpcaoMenu.MINHAS_RESERVAS:
+            return DelegarMinhasReservas(escolha=texto)
         case OpcaoMenu.TROCAR_CONDOMINIO:
             return _recomecar_identificacao()
         case _ if escolhido in _INDISPONIVEIS:
@@ -451,6 +485,23 @@ def _reserva(conversa: Conversa, texto: str) -> Decisao:
             transicao=Transicao.para_menu(condominio),
         )
     return DelegarReserva(escolha=texto)
+
+
+def _minhas_reservas(conversa: Conversa, texto: str) -> Decisao:
+    """Dentro do fluxo — aqui quase tudo é escolha de tela.
+
+    Só o 0 é comando, e é resolvido AQUI: é a saída que precisa funcionar mesmo
+    com o rascunho ilegível. Sair não desfaz nada — o cancelamento só acontece
+    depois do 1 na confirmação.
+    """
+    condominio = _condominio_confirmado(conversa)
+
+    if opcao(texto) == ESCAPE:
+        return Responder(
+            mensagem=Mensagem.NADA_CANCELADO,
+            transicao=Transicao.para_menu(condominio),
+        )
+    return DelegarMinhasReservas(escolha=texto)
 
 
 def _ocorrencia(conversa: Conversa, tipo: MessageType, texto: str | None) -> Decisao:
