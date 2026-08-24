@@ -15,10 +15,13 @@ from uuid import uuid4
 import pytest
 
 from condominios import (
+    FRASE_QR,
     CondominioElegivel,
+    buscar_elegivel_por_slug,
     buscar_id_por_slug,
     listar_elegiveis,
     nome_por_id,
+    resolver_por_frase,
 )
 
 
@@ -118,3 +121,97 @@ def test_condominio_elegivel_e_imutavel():
     condominio = CondominioElegivel(id=uuid4(), nome="Edifício Alfa")
     with pytest.raises(Exception):
         condominio.nome = "Outro"
+
+
+# ── entrada por QR (Etapa 7) ─────────────────────────────────────────────────
+
+GABRO = {"id": uuid4(), "nome": "Gabro"}
+FRASE_GABRO = f"{FRASE_QR}Gabro"
+
+
+@pytest.mark.parametrize(
+    "texto",
+    [
+        None,
+        "",
+        "   ",
+        "oi",
+        "Gabro",
+        "Sou morador do condomínio Gabro",
+        "Bom dia! Olá! Sou morador do condomínio Gabro",
+    ],
+)
+def test_texto_que_nao_e_a_frase_nem_toca_o_banco(texto):
+    """O prefixo é a peneira barata: mensagem comum não paga query."""
+    conn = _FakeConn()
+    assert asyncio.run(resolver_por_frase(conn, texto)) is None
+    assert conn.calls == []
+
+
+def test_a_frase_resolve_o_condominio_e_a_query_filtra_ativo():
+    conn = _FakeConn(fetch_result=[GABRO])
+    achado = asyncio.run(resolver_por_frase(conn, FRASE_GABRO))
+
+    assert achado == CondominioElegivel.model_validate(GABRO)
+    [(tipo, query, args)] = conn.calls
+    assert tipo == "fetch"
+    assert "where ativo" in " ".join(query.lower().split())
+    assert args == (FRASE_GABRO, FRASE_QR)
+
+
+def test_frase_com_espaco_sobrando_ainda_resolve():
+    conn = _FakeConn(fetch_result=[GABRO])
+    assert asyncio.run(resolver_por_frase(conn, f"  {FRASE_GABRO}  ")) is not None
+    [(_, _, args)] = conn.calls
+    assert args == (FRASE_GABRO, FRASE_QR)
+
+
+def test_frase_com_pergunta_colada_cai_fora():
+    """Quem digita a dúvida por cima do texto do cartaz vai para o menu."""
+    conn = _FakeConn(fetch_result=[])
+    assert asyncio.run(resolver_por_frase(conn, f"{FRASE_GABRO} tem goteira")) is None
+
+
+def test_nome_desconhecido_devolve_none():
+    conn = _FakeConn(fetch_result=[])
+    assert asyncio.run(resolver_por_frase(conn, f"{FRASE_QR}Inexistente")) is None
+
+
+def test_homonimos_viram_none_em_vez_de_predio_errado():
+    """`nome` não tem UNIQUE: duas linhas é ambiguidade, e ambiguidade é menu."""
+    conn = _FakeConn(fetch_result=[GABRO, {"id": uuid4(), "nome": "Gabro"}])
+    assert asyncio.run(resolver_por_frase(conn, FRASE_GABRO)) is None
+
+
+def test_caixa_diferente_nao_resolve():
+    """Sem lower(): `nome` não tem CHECK de caixa, então dobrar a caixa criaria
+    ambiguidade que o dado não tem."""
+    conn = _FakeConn(fetch_result=[])
+    assert asyncio.run(resolver_por_frase(conn, f"{FRASE_QR}GABRO")) is None
+    assert conn.calls, "a caixa é decidida pelo banco, não pela peneira"
+
+
+# ── a entrada da ferramenta de cartaz ────────────────────────────────────────
+
+
+def test_slug_em_branco_falha_antes_do_banco_tambem_na_ferramenta():
+    conn = _FakeConn()
+    with pytest.raises(ValueError, match="slug em branco"):
+        asyncio.run(buscar_elegivel_por_slug(conn, "  "))
+    assert conn.calls == []
+
+
+def test_ferramenta_so_alcanca_condominio_ativo():
+    conn = _FakeConn(fetchrow_result=GABRO)
+    achado = asyncio.run(buscar_elegivel_por_slug(conn, "res-gabro"))
+
+    assert achado == CondominioElegivel.model_validate(GABRO)
+    [(tipo, query, args)] = conn.calls
+    assert tipo == "fetchrow"
+    assert "where ativo" in " ".join(query.lower().split())
+    assert args == ("res-gabro",)
+
+
+def test_slug_inativo_ou_inexistente_devolve_none_para_a_ferramenta():
+    conn = _FakeConn(fetchrow_result=None)
+    assert asyncio.run(buscar_elegivel_por_slug(conn, "eval-sentinela")) is None

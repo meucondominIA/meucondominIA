@@ -30,6 +30,7 @@ from roteador import Mensagem, OpcaoMenu
 
 class MensagemAtendimento(str, Enum):
     CONFIRMAR_CONDOMINIO = "confirmar_condominio"
+    BOAS_VINDAS_QR = "boas_vindas_qr"
     CONTINGENCIA = "contingencia"
     SEM_CONDOMINIOS = "sem_condominios"
     REGRA_NAO_ENCONTRADA = "regra_nao_encontrada"
@@ -382,6 +383,11 @@ def renderizar(
             )
         case MensagemAtendimento.CONFIRMAR_CONDOMINIO:
             return f"É o {_exigir_nome(nome_condominio)}?\n\n{_SIM_NAO}"
+        case MensagemAtendimento.BOAS_VINDAS_QR:
+            return (
+                f"Olá! Você está no atendimento do {_exigir_nome(nome_condominio)}."
+                f"\n\n{_MENU}"
+            )
         case Mensagem.RECONFIRMAR_CONDOMINIO:
             return (
                 "Olá de novo! Só para confirmar: você fala do "

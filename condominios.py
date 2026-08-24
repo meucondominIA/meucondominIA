@@ -31,6 +31,8 @@ _ELEGIVEIS = """
      order by nome collate "pt-BR-x-icu", id
 """
 
+FRASE_QR = "Olá! Sou morador do condomínio "
+
 
 class CondominioElegivel(BaseModel):
     """Um condomínio oferecível ao morador — só o que a lista precisa mostrar."""
@@ -47,6 +49,54 @@ async def buscar_id_por_slug(conn: asyncpg.Connection, slug: str) -> UUID | None
     if not slug:
         raise ValueError("slug em branco: não identifica condomínio")
     return await conn.fetchval("select id from condominios where slug = $1", slug)
+
+
+async def resolver_por_frase(
+    conn: asyncpg.Connection, texto: str | None
+) -> CondominioElegivel | None:
+    """O condomínio afirmado pela frase do QR (Etapa 7), ou None.
+
+    Match exato, não busca: a frase INTEIRA é o identificador, e o `||`
+    reconstrói a candidata a partir do `nome` — QR e banco derivam do mesmo
+    dado, então FRASE_QR não pode ter segunda cópia em lugar nenhum.
+
+    Filtra `ativo` ao contrário de buscar_id_por_slug: aqui quem pergunta é
+    morador, e o tenant sintético do eval não pode virar atendimento.
+
+    fetch e não fetchval porque `nome` não é único: homônimos devolvem duas
+    linhas e viram None. Prédio ambíguo cai no menu, nunca no prédio errado.
+    """
+    if not texto:
+        return None
+    frase = texto.strip()
+    if not frase.startswith(FRASE_QR):
+        return None
+
+    rows = await conn.fetch(
+        "select id, nome from condominios where ativo and $1 = $2 || nome",
+        frase,
+        FRASE_QR,
+    )
+    if len(rows) != 1:
+        return None
+    return CondominioElegivel.model_validate(dict(rows[0]))
+
+
+async def buscar_elegivel_por_slug(
+    conn: asyncpg.Connection, slug: str
+) -> CondominioElegivel | None:
+    """O condomínio oferecível deste slug — a entrada da ferramenta que gera o QR.
+
+    Filtra `ativo` porque um QR impresso de condomínio desativado é o pior
+    artefato desta etapa: ninguém consegue usá-lo e ninguém descobre por quê.
+    """
+    slug = slug.strip()
+    if not slug:
+        raise ValueError("slug em branco: não identifica condomínio")
+    row = await conn.fetchrow(
+        "select id, nome from condominios where ativo and slug = $1", slug
+    )
+    return CondominioElegivel.model_validate(dict(row)) if row else None
 
 
 async def listar_elegiveis(conn: asyncpg.Connection) -> list[CondominioElegivel]:

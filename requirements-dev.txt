@@ -10,3 +10,5 @@ pytest          # framework de testes
 ruff            # linter + formatador (rápido, escrito em Rust)
 httpx           # cliente HTTP usado pelo TestClient do FastAPI/Starlette
 testcontainers  # sobe um Postgres efêmero em Docker p/ os testes de integração (pytest -m integration)
+
+segno           # gera o QR de entrada (ferramentas/qr.py); zero dependências

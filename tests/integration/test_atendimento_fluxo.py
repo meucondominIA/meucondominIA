@@ -22,11 +22,12 @@ import pytest
 import db
 import processador
 import zpro_client
+from condominios import FRASE_QR
 
 pytestmark = pytest.mark.integration
 
 
-def _payload(texto: str, *, msg_id: str, numero: str = "555592372732") -> dict:
+def _payload(texto: str, *, msg_id: str, numero: str = "555590000000") -> dict:
     return {
         "method": "message",
         "msg": {
@@ -72,7 +73,7 @@ class _Ambiente:
             row = await conn.fetchrow(
                 "select estado, condominio_id, condominio_pendente from conversas "
                 "where telefone = $1 and status = 'ativa'",
-                "555592372732",
+                "555590000000",
             )
         return row["estado"], row["condominio_id"], row["condominio_pendente"]
 
@@ -214,5 +215,88 @@ def test_sentinela_nunca_e_escolhivel(ambiente):
         # 3 elegíveis: índice 4 está além do teto -> pede de novo, não confirma.
         assert "1 - Edifício Gabro" in resposta
         assert (await a.estado())[0] == "identificacao"
+
+    ambiente(passos)
+
+
+# ── entrada por QR (Etapa 7) ─────────────────────────────────────────────────
+
+
+def test_qr_abre_o_menu_do_predio_certo_sem_perguntar_nada(ambiente):
+    """Zero respostas até o menu — e o tenant conferido pelo NOME no banco, não
+    por uma variável que o próprio teste escolheu."""
+
+    async def passos(a: _Ambiente):
+        resposta = await a.entregar(f"{FRASE_QR}Edifício Solar")
+
+        assert "Edifício Solar" in resposta
+        assert "Como posso ajudar" in resposta
+        assert "Responda com o número" in resposta
+
+        estado, cond, pend = await a.estado()
+        assert estado == "menu" and pend is None
+
+        async with a.pool.acquire() as conn:
+            nome = await conn.fetchval(
+                "select nome from condominios where id = $1", cond
+            )
+        assert nome == "Edifício Solar", "o QR do Solar não pode abrir outro prédio"
+
+    ambiente(passos)
+
+
+def test_qr_do_sentinela_cai_na_lista_em_vez_de_entrar(ambiente):
+    """O tenant inativo é recusado no caminho inteiro, não só no repositório."""
+
+    async def passos(a: _Ambiente):
+        resposta = await a.entregar(f"{FRASE_QR}Sentinela (eval)")
+
+        assert "1 - Edifício Gabro" in resposta
+        assert "Sentinela" not in resposta
+        assert await a.estado() == ("identificacao", None, None)
+
+    ambiente(passos)
+
+
+def test_frase_com_pergunta_colada_cai_na_lista(ambiente):
+    """Quem digita a dúvida por cima do texto do QR tem a experiência de hoje —
+    nunca o prédio errado."""
+
+    async def passos(a: _Ambiente):
+        resposta = await a.entregar(f"{FRASE_QR}Edifício Solar tem uma goteira")
+
+        assert "1 - Edifício Gabro" in resposta
+        assert (await a.estado())[0] == "identificacao"
+
+    ambiente(passos)
+
+
+def test_o_menu_de_escolha_continua_alcancavel_depois_do_qr(ambiente):
+    """A restrição mais importante do recorte: os dois caminhos coexistem."""
+
+    async def passos(a: _Ambiente):
+        await a.entregar(f"{FRASE_QR}Edifício Solar")
+
+        volta = await a.entregar("9")
+
+        assert "1 - Edifício Gabro" in volta
+        assert await a.estado() == ("identificacao", None, None)
+
+    ambiente(passos)
+
+
+def test_quem_ja_tem_predio_nao_e_desviado_pelo_qr_de_outro(ambiente):
+    """Decisão do dono: trocar de prédio é operação de cadastro. O QR do Verde
+    não tira do Solar quem já está no Solar."""
+
+    async def passos(a: _Ambiente):
+        await a.entregar(f"{FRASE_QR}Edifício Solar")
+        _, solar, _ = await a.estado()
+
+        resposta = await a.entregar(f"{FRASE_QR}Edifício Verde")
+
+        estado, cond, _ = await a.estado()
+        assert (estado, cond) == ("menu", solar)
+        assert "Verde" not in resposta
 
     ambiente(passos)

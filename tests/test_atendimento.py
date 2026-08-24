@@ -19,6 +19,7 @@ import pytest
 
 import atendimento
 from atendimento import GeracaoPendente
+from condominios import FRASE_QR
 from config import settings
 from contexto import MAX_TROCAS, Troca
 from roteador import Conversa, Estado, Transicao
@@ -34,16 +35,22 @@ _RECENTE = settings.sessao_ttl_horas / 2
 
 
 class _FakeConn:
-    """fetch devolve as linhas da lista; fetchval devolve o nome por id."""
+    """fetch devolve as linhas da lista; fetchval devolve o nome por id.
 
-    def __init__(self, lista=(), nomes=None):
+    As duas leituras que usam `fetch` se distinguem pela query: a do QR carrega
+    a concatenação, a da lista não.
+    """
+
+    def __init__(self, lista=(), nomes=None, qr=()):
         self._lista = list(lista)
         self._nomes = nomes or {}
+        self._qr = list(qr)
         self.calls = []
 
     async def fetch(self, query, *args):
         self.calls.append(("fetch", query, args))
-        return [{"id": cid, "nome": nome} for cid, nome in self._lista]
+        linhas = self._qr if "|| nome" in query else self._lista
+        return [{"id": cid, "nome": nome} for cid, nome in linhas]
 
     async def fetchval(self, query, *args):
         self.calls.append(("fetchval", query, args))
@@ -96,6 +103,63 @@ def _responder(
             conversa_nova=nova,
         )
     )
+
+
+# ── entrada por QR (Etapa 7) ─────────────────────────────────────────────────
+
+FRASE_BETA = f"{FRASE_QR}Beta"
+
+
+def test_qr_abre_o_menu_do_condominio_do_qr():
+    """A asserção cita o id ESPERADO: 'nasceu em menu' ficaria verde no prédio
+    errado, que é a única falha desta etapa que não levanta exceção."""
+    conn = _FakeConn(qr=[(C2, "Beta")])
+    texto, transicao = _responder(
+        conn, _conversa(Estado.IDENTIFICACAO), FRASE_BETA, nova=True
+    )
+
+    assert transicao == Transicao.para_menu(C2)
+    assert "Beta" in texto and "Como posso ajudar" in texto
+
+
+def test_frase_de_condominio_desconhecido_cai_na_lista():
+    conn = _FakeConn(lista=LISTA3, qr=[])
+    texto, transicao = _responder(
+        conn, _conversa(Estado.IDENTIFICACAO), f"{FRASE_QR}Fantasma", nova=True
+    )
+
+    assert transicao is None
+    assert "Alfa" in texto and "Beta" in texto
+
+
+def test_texto_comum_no_primeiro_contato_nao_consulta_o_qr():
+    """A peneira do prefixo é o que mantém o custo em zero para o caso comum."""
+    conn = _FakeConn(lista=LISTA3)
+    _responder(conn, _conversa(Estado.IDENTIFICACAO), "oi", nova=True)
+
+    assert not [c for c in conn.calls if "|| nome" in c[1]]
+
+
+def test_quem_ja_tem_condominio_lembrado_nao_e_levado_pelo_qr():
+    """Decisão do dono: trocar de prédio é operação de cadastro, não de mensagem.
+    O QR de OUTRO condomínio não desvia quem já tem um."""
+    conn = _FakeConn(nomes={C1: "Alfa"}, qr=[(C2, "Beta")])
+    conversa = _conversa(Estado.AGUARDANDO_CONFIRMACAO, pendente=C1)
+
+    texto, transicao = _responder(conn, conversa, FRASE_BETA, nova=True)
+
+    assert "É o Alfa?" in texto
+    assert transicao is None
+    assert not [c for c in conn.calls if "|| nome" in c[1]]
+
+
+def test_quem_esta_no_meio_do_atendimento_nao_e_levado_pelo_qr():
+    conn = _FakeConn(qr=[(C2, "Beta")])
+    texto, transicao = _responder(conn, _conversa(Estado.MENU, condominio=C1), FRASE_BETA)
+
+    assert transicao is None
+    assert "Como posso ajudar" in texto
+    assert not [c for c in conn.calls if "|| nome" in c[1]]
 
 
 # ── conversa reaberta com o tenant lembrado ──────────────────────────────────

@@ -18,6 +18,10 @@ class Settings(BaseSettings):
     zpro_api_url: str
     zpro_api_token: str
 
+    # Opcional porque só a CLI do QR lê: obrigatório derrubaria o webhook por
+    # falta de config de uma ferramenta que nem roda no servidor.
+    whatsapp_numero: str | None = None
+
     openai_api_key: str
     embedding_model: str = "text-embedding-3-large"
     embedding_dimensions: int = 3072

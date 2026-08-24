@@ -38,6 +38,7 @@ from condominios import (
     CondominioElegivel,
     listar_elegiveis,
     nome_por_id,
+    resolver_por_frase,
     timezone_por_id,
 )
 from config import settings
@@ -55,6 +56,7 @@ from reservas import (
 from roteador import (
     Conversa,
     Decisao,
+    Estado,
     DelegarDuvida,
     DelegarIdentificacao,
     DelegarMinhasReservas,
@@ -129,7 +131,16 @@ async def responder(
     `entrada_id` é o gate de idempotência das duas escritas
     (uq_reservas_origem_mensagem, uq_solicitacoes_origem_mensagem): reprocessar a
     mesma mensagem devolve o que já foi gravado em vez de duplicar.
+
+    O QR só é lido de quem ainda não tem condomínio: quem já tem segue com o
+    dele, e trocar de prédio é operação de cadastro, não de mensagem. As duas
+    guardas nunca disputam — em identificacao o CHECK exige pendente nulo.
     """
+    if conversa.estado is Estado.IDENTIFICACAO:
+        qr = await resolver_por_frase(conn, texto)
+        if qr is not None:
+            return _entrar_por_qr(qr)
+
     if conversa_nova and conversa.condominio_pendente is not None:
         return await _confirmar_lembrado(conn, conversa)
 
@@ -166,6 +177,18 @@ async def _resolver(
             return await _ocorrer(conn, conversa, decisao, entrada_id, midia)
         case Responder():
             return await _responder(conn, conversa, decisao)
+
+
+def _entrar_por_qr(qr: CondominioElegivel) -> tuple[str, Transicao]:
+    """A entrada pelo QR: AFIRMA o condomínio em vez de perguntar.
+
+    Pura porque o resolvedor já devolveu o nome — a tela não precisa de segunda
+    consulta.
+    """
+    return (
+        renderizar(MensagemAtendimento.BOAS_VINDAS_QR, nome_condominio=qr.nome),
+        Transicao.para_menu(qr.id),
+    )
 
 
 async def _confirmar_lembrado(
