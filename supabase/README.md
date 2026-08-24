@@ -27,7 +27,7 @@ oficial: "Making schema changes directly on your remote database bypasses the
 migration history").
 
 Fluxos possíveis:
-- **Via Claude/MCP:** `apply_migration` (executa e registra). Depois, espelhar o
+- **Via MCP:** `apply_migration` (executa e registra). Depois, espelhar o
   arquivo aqui com o mesmo timestamp/nome que aparecer em `list_migrations`.
 - **Via CLI (quando instalar):** `supabase link` → `supabase migration new <nome>`
   → editar o SQL → `supabase db push`. Conferir sincronia com

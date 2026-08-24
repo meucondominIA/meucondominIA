@@ -11,9 +11,10 @@ venv/
 .env.*
 !.env.example
 
-# Instruções privadas (não vão pro repo)
+# Instruções e config do assistente (não vão pro repo)
 CLAUDE.local.md
 CLAUDE.md
+.claude/
 
 # Logs / OS
 *.log
