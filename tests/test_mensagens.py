@@ -26,7 +26,7 @@ LINHA_CONVERSA = {
     "condominio_id": None,
     "condominio_pendente": None,
     "ultima_interacao_em": datetime(2026, 7, 21, 12, 0, tzinfo=timezone.utc),
-    "telefone": "555592372732",
+    "telefone": "555590000000",
     "rascunho": None,
 }
 
@@ -34,7 +34,7 @@ LINHA_CONVERSA = {
 def _msg(text: str | None = "Oi") -> IncomingMessage:
     return IncomingMessage(
         message_id="MSG-1",
-        phone="555592372732",
+        phone="555590000000",
         text=text,
         message_type=MessageType.TEXT if text else MessageType.UNSUPPORTED,
         push_name="Lorenzo",
@@ -73,7 +73,7 @@ class _FakeConn:
 def test_conversa_ativa_existente_nao_e_nova():
     """Achou a ativa no SELECT: nem tenta inserir, e nova=False."""
     conn = _FakeConn(fetchrow_results=[LINHA_CONVERSA])
-    conversa, nova = asyncio.run(mensagens.conversa_ativa(conn, "555592372732"))
+    conversa, nova = asyncio.run(mensagens.conversa_ativa(conn, "555590000000"))
 
     assert conversa.id == CONVERSA_ID
     assert conversa.estado is Estado.IDENTIFICACAO
@@ -81,13 +81,13 @@ def test_conversa_ativa_existente_nao_e_nova():
     assert len(conn.calls) == 1
     _, query, args = conn.calls[0]
     assert "insert" not in query.lower()
-    assert args == ("555592372732",)
+    assert args == ("555590000000",)
 
 
 def test_conversa_ativa_inexistente_abre_e_marca_nova():
     """Sem ativa, o INSERT abre outra e o `nova` habilita a pergunta certa."""
     conn = _FakeConn(fetchrow_results=[None, LINHA_CONVERSA])
-    conversa, nova = asyncio.run(mensagens.conversa_ativa(conn, "555592372732"))
+    conversa, nova = asyncio.run(mensagens.conversa_ativa(conn, "555590000000"))
 
     assert conversa.id == CONVERSA_ID and nova is True
     _, query, _ = conn.calls[1]
@@ -107,7 +107,7 @@ def test_conversa_ativa_perde_a_corrida_e_relê():
     """Outra mensagem do mesmo telefone abriu entre o SELECT e o INSERT: o índice
     parcial decide o vencedor, o INSERT vira DO NOTHING e a gente relê."""
     conn = _FakeConn(fetchrow_results=[None, None, LINHA_CONVERSA])
-    conversa, nova = asyncio.run(mensagens.conversa_ativa(conn, "555592372732"))
+    conversa, nova = asyncio.run(mensagens.conversa_ativa(conn, "555590000000"))
 
     assert conversa.id == CONVERSA_ID
     assert nova is False, "perder a corrida não é conversa nova"

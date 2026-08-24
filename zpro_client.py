@@ -26,7 +26,7 @@ _cliente: httpx.AsyncClient | None = None
 class OutgoingMessage(BaseModel):
     model_config = ConfigDict(frozen=True)
 
-    phone: str  # só dígitos com DDI: "555592372732"
+    phone: str  # só dígitos com DDI: "555590000000"
     text: str
     external_key: str  # message_id da entrada — correlação, não idempotência
 

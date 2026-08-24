@@ -102,7 +102,7 @@ async def _ocorrencia_com_aviso(conn, *, cond, origem, telefone="5512"):
 
 def test_pedido_e_intencao_nascem_juntos(rodar_tx):
     async def corpo(conn):
-        cond = await _cond(conn, "gabro", "5555992372732")
+        cond = await _cond(conn, "gabro", "5555990000000")
         area = await _area(conn, cond)
         rid = await _reserva_com_aviso(
             conn, cond=cond, area=area, origem=await _entrada(conn, "M1")
@@ -125,7 +125,7 @@ def test_crash_na_tx_desfaz_pedido_E_intencao(rodar_tx):
     """Atômico nos dois sentidos: nem aviso órfão, nem pedido sem aviso."""
 
     async def corpo(conn):
-        cond = await _cond(conn, "gabro", "5555992372732")
+        cond = await _cond(conn, "gabro", "5555990000000")
         area = await _area(conn, cond)
         origem = await _entrada(conn, "M1")
 
@@ -150,7 +150,7 @@ def test_replay_da_mesma_mensagem_nao_cria_segundo_aviso(rodar_tx):
     """A janela real: a reentrega do sweeper reprocessa a MESMA entrada."""
 
     async def corpo(conn):
-        cond = await _cond(conn, "gabro", "5555992372732")
+        cond = await _cond(conn, "gabro", "5555990000000")
         area = await _area(conn, cond)
         origem = await _entrada(conn, "M1")
 
@@ -167,7 +167,7 @@ def test_replay_depois_do_aviso_enviado_nao_ressuscita_a_fila(rodar_tx):
     """O pior caso: o síndico já foi avisado e a mensagem volta a ser processada."""
 
     async def corpo(conn):
-        cond = await _cond(conn, "gabro", "5555992372732")
+        cond = await _cond(conn, "gabro", "5555990000000")
         area = await _area(conn, cond)
         origem = await _entrada(conn, "M1")
 
@@ -187,7 +187,7 @@ def test_replay_depois_do_aviso_enviado_nao_ressuscita_a_fila(rodar_tx):
 
 def test_o_replay_preserva_o_texto_do_primeiro_aviso(rodar_tx):
     async def corpo(conn):
-        cond = await _cond(conn, "gabro", "5555992372732")
+        cond = await _cond(conn, "gabro", "5555990000000")
         area = await _area(conn, cond)
         rid = await _reserva_com_aviso(
             conn, cond=cond, area=area, origem=await _entrada(conn, "M1")
@@ -206,7 +206,7 @@ def test_dia_tomado_nao_enfileira_aviso(rodar_tx):
     """confirmar_reserva devolve None: não há pedido a avisar."""
 
     async def corpo(conn):
-        cond = await _cond(conn, "gabro", "5555992372732")
+        cond = await _cond(conn, "gabro", "5555990000000")
         area = await _area(conn, cond)
         await _reserva_com_aviso(
             conn, cond=cond, area=area, origem=await _entrada(conn, "M1")
@@ -234,7 +234,7 @@ def test_check_recusa_linha_sem_pedido_ou_com_dois(rodar_tx, rotulo, aceitas):
     não é garantido; com os dois preenchidos só a um_pedido morde."""
 
     async def corpo(conn):
-        cond = await _cond(conn, "gabro", "5555992372732")
+        cond = await _cond(conn, "gabro", "5555990000000")
         area = await _area(conn, cond)
         rid = await _reserva_com_aviso(
             conn, cond=cond, area=area, origem=await _entrada(conn, "M1")
@@ -260,7 +260,7 @@ def test_check_recusa_linha_sem_pedido_ou_com_dois(rodar_tx, rotulo, aceitas):
 )
 def test_check_recusa_tipo_que_nao_fala_do_id_preenchido(rodar_tx, tipo):
     async def corpo(conn):
-        cond = await _cond(conn, "gabro", "5555992372732")
+        cond = await _cond(conn, "gabro", "5555990000000")
         area = await _area(conn, cond)
         rid = await _reserva_com_aviso(
             conn, cond=cond, area=area, origem=await _entrada(conn, "M1")
@@ -287,7 +287,7 @@ def test_check_recusa_tipo_que_nao_fala_do_id_preenchido(rodar_tx, tipo):
 
 def test_a_mesma_reserva_aceita_os_dois_tipos_e_recusa_o_terceiro(rodar_tx):
     async def corpo(conn):
-        cond = await _cond(conn, "gabro", "5555992372732")
+        cond = await _cond(conn, "gabro", "5555990000000")
         area = await _area(conn, cond)
         rid = await _reserva_com_aviso(
             conn, cond=cond, area=area, origem=await _entrada(conn, "M1")
@@ -327,7 +327,7 @@ def test_o_lote_sai_na_ordem_em_que_foi_enfileirado(rodar_tx):
     externo o síndico lê o cancelamento antes da reserva que o gerou."""
 
     async def corpo(conn):
-        cond = await _cond(conn, "gabro", "5555992372732")
+        cond = await _cond(conn, "gabro", "5555990000000")
         area = await _area(conn, cond)
         for n in range(8):
             rid = await _reserva_com_aviso(
@@ -356,7 +356,7 @@ def test_o_lote_resolve_o_sindico_do_tenant_certo(rodar_tx):
     """Isolamento: o destino sai do JOIN por PK, nunca de outro tenant."""
 
     async def corpo(conn):
-        um = await _cond(conn, "gabro", "5555992372732")
+        um = await _cond(conn, "gabro", "5555990000000")
         outro = await _cond(conn, "outro", "5511888887777")
         await _reserva_com_aviso(
             conn, cond=um, area=await _area(conn, um),
@@ -368,7 +368,7 @@ def test_o_lote_resolve_o_sindico_do_tenant_certo(rodar_tx):
         )
 
         lote = await reservar_lote(conn, lease_segundos=60.0, limite=10)
-        assert {a.telefone for a in lote} == {"5555992372732", "5511888887777"}
+        assert {a.telefone for a in lote} == {"5555990000000", "5511888887777"}
 
     rodar_tx(corpo)
 
@@ -399,7 +399,7 @@ def test_tenant_sem_sindico_represa_e_o_cadastro_libera(rodar_tx):
 
 def test_marcar_enviado_tira_do_lote(rodar_tx):
     async def corpo(conn):
-        cond = await _cond(conn, "gabro", "5555992372732")
+        cond = await _cond(conn, "gabro", "5555990000000")
         await _reserva_com_aviso(
             conn, cond=cond, area=await _area(conn, cond),
             origem=await _entrada(conn, "M1"),
@@ -418,7 +418,7 @@ def test_lease_esconde_o_aviso_e_a_expiracao_o_devolve(rodar_tx):
     aviso volta — at-least-once, nunca exactly once."""
 
     async def corpo(conn):
-        cond = await _cond(conn, "gabro", "5555992372732")
+        cond = await _cond(conn, "gabro", "5555990000000")
         await _reserva_com_aviso(
             conn, cond=cond, area=await _area(conn, cond),
             origem=await _entrada(conn, "M1"),
@@ -444,7 +444,7 @@ def test_dois_workers_enviam_cada_aviso_uma_vez(rodar_concorrente):
 
     async def corpo(abrir):
         preparo = await abrir()
-        cond = await _cond(preparo, "gabro", "5555992372732")
+        cond = await _cond(preparo, "gabro", "5555990000000")
         await _reserva_com_aviso(
             preparo, cond=cond, area=await _area(preparo, cond),
             origem=await _entrada(preparo, "M1"),

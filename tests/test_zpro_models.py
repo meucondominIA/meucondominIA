@@ -51,12 +51,12 @@ def _raw(
     msg_id="MSG-1",
     from_me=False,
     remote_jid=None,
-    sender_pn="555592372732@s.whatsapp.net",
+    sender_pn="555590000000@s.whatsapp.net",
     push_name="Lorenzo",
     message=None,
     is_group=False,
     include_contact=True,
-    number="555592372732",
+    number="555590000000",
     contact_name="Lorenzo",
     channel_type="baileys",
 ) -> dict:
@@ -93,7 +93,7 @@ def test_extrai_campos_basicos():
     raw = _raw(msg_id="ABC-1")
     msg = parse_zpro_webhook(raw)
     assert msg.message_id == "ABC-1"
-    assert msg.phone == "555592372732"
+    assert msg.phone == "555590000000"
     assert msg.text == "Oi"
     assert msg.message_type is MessageType.TEXT
     assert msg.push_name == "Lorenzo"
@@ -232,8 +232,8 @@ def test_telefone_prioriza_contact_number():
 
 
 def test_telefone_fallback_para_sender_pn():
-    raw = _raw(include_contact=False, sender_pn="555592372732@s.whatsapp.net")
-    assert parse_zpro_webhook(raw).phone == "555592372732"
+    raw = _raw(include_contact=False, sender_pn="555590000000@s.whatsapp.net")
+    assert parse_zpro_webhook(raw).phone == "555590000000"
 
 
 def test_sem_telefone_levanta_ignore():
@@ -275,7 +275,7 @@ def test_push_name_fallback_para_contact_name():
 
 
 def test_normalize_phone():
-    assert normalize_phone("555592372732@s.whatsapp.net") == "555592372732"
-    assert normalize_phone("555592372732") == "555592372732"
+    assert normalize_phone("555590000000@s.whatsapp.net") == "555590000000"
+    assert normalize_phone("555590000000") == "555590000000"
     assert normalize_phone(None) is None
     assert normalize_phone("sem digitos") is None

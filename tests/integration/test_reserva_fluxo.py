@@ -28,7 +28,7 @@ from config import settings
 
 pytestmark = pytest.mark.integration
 
-NUMERO = "555592372732"
+NUMERO = "555590000000"
 TZ = "America/Sao_Paulo"
 
 

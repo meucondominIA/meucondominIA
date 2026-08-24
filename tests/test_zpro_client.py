@@ -22,7 +22,7 @@ RESPOSTA_REAL = {
     "data": {"message": "Message sent successfully", "ticketId": 4578},
 }
 
-MSG = OutgoingMessage(phone="555592372732", text="Eco: Oi", external_key="MSG-1")
+MSG = OutgoingMessage(phone="555590000000", text="Eco: Oi", external_key="MSG-1")
 
 
 async def _roda(handler, msg: OutgoingMessage) -> None:
@@ -78,7 +78,7 @@ def test_request_segue_contrato_verificado():
     assert req.headers["Authorization"] == f"Bearer {settings.zpro_api_token}"
     assert json.loads(req.content) == {
         "body": "Eco: Oi",
-        "number": "555592372732",
+        "number": "555590000000",
         "externalKey": "MSG-1",
         "isClosed": False,
     }

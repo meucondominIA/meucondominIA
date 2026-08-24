@@ -65,7 +65,7 @@ def _payload(msg_id="ORFA-1"):
             "key": {
                 "id": msg_id,
                 "fromMe": False,
-                "sender_pn": "555592372732@s.whatsapp.net",
+                "sender_pn": "555590000000@s.whatsapp.net",
             },
             "messageTimestamp": 123,
             "pushName": "Lorenzo",
@@ -76,7 +76,7 @@ def _payload(msg_id="ORFA-1"):
             "isGroup": False,
             "tenantId": 8,
             "whatsappId": 45,
-            "contact": {"id": 1, "number": "555592372732", "name": "Lorenzo"},
+            "contact": {"id": 1, "number": "555590000000", "name": "Lorenzo"},
             "whatsapp": {"id": 45, "type": "baileys"},
         },
     }

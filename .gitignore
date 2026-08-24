@@ -26,3 +26,22 @@ docs/
 # Resultados de eval: contêm trechos do regimento nas respostas (mesma política
 # acima); servem ao futuro localmente, não influenciam o funcionamento
 eval/resultado-geracao-*.json
+
+# Payload real do webhook: é uma captura de mensagem de verdade e carrega nome e
+# telefone. Serve de referência local do formato de entrada; não vai pro repo.
+json_ZPRO
+
+# PDFs: são insumo de ingestão, não código — entram pela CLI, não por import.
+# A regra é ampla de propósito: regimento de condomínio chega em PDF, e essa é
+# exatamente a classe de arquivo que não pode escapar pro repositório.
+*.pdf
+
+# Portal Next.js: caminho descartado no pivô para reserva automática. Sai do
+# índice para não confundir quem clona; a história fica no histórico do Git.
+portal/
+node_modules/
+.next/
+
+# Caches de ferramentas
+.pytest_cache/
+.ruff_cache/

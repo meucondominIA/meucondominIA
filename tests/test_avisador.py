@@ -15,7 +15,7 @@ import pytest
 import avisador
 from avisos import AvisoPendente
 
-UM = AvisoPendente(id=uuid4(), texto="Reserva #abc", telefone="5555992372732")
+UM = AvisoPendente(id=uuid4(), texto="Reserva #abc", telefone="5555990000000")
 OUTRO = AvisoPendente(id=uuid4(), texto="Ocorrência #def", telefone="5511888887777")
 
 
@@ -87,7 +87,7 @@ def test_endereca_o_sindico_certo_com_objeto_tipado(cenario):
     asyncio.run(avisador.enviar_pendentes())
 
     saidas = [chamada.args[0] for chamada in enviar.await_args_list]
-    assert [s.phone for s in saidas] == ["5555992372732", "5511888887777"]
+    assert [s.phone for s in saidas] == ["5555990000000", "5511888887777"]
     assert [s.text for s in saidas] == ["Reserva #abc", "Ocorrência #def"]
     # external_key é o id do AVISO: correlação, não idempotência.
     assert [s.external_key for s in saidas] == [str(UM.id), str(OUTRO.id)]

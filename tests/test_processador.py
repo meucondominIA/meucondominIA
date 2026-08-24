@@ -62,7 +62,7 @@ PENDENTE = GeracaoPendente(
 def _msg(text: str | None = "Oi") -> IncomingMessage:
     return IncomingMessage(
         message_id="MSG-1",
-        phone="555592372732",
+        phone="555590000000",
         text=text,
         message_type=MessageType.TEXT if text else MessageType.UNSUPPORTED,
         push_name="Lorenzo",
@@ -165,11 +165,11 @@ def test_fluxo_feliz_envia_a_decisao_e_grava_saida(deps):
     asyncio.run(processador.processar_mensagem(_msg("Oi")))
 
     out = deps.enviar.await_args.args[0]
-    assert out.phone == "555592372732"
+    assert out.phone == "555590000000"
     assert out.text == RESPOSTA
     assert out.external_key == "MSG-1"
 
-    deps.upsert.assert_awaited_once_with(deps.conn, "555592372732")
+    deps.upsert.assert_awaited_once_with(deps.conn, "555590000000")
     deps.saida.assert_awaited_once_with(deps.conn, CONVERSA_ID, RESPOSTA, ENTRADA_ID)
     deps.interacao.assert_awaited_once_with(deps.conn, CONVERSA_ID)
     deps.ja_existe.assert_not_awaited()
@@ -294,7 +294,7 @@ def _payload(msg_id="E2E-1", text="Oi"):
             "key": {
                 "id": msg_id,
                 "fromMe": False,
-                "sender_pn": "555592372732@s.whatsapp.net",
+                "sender_pn": "555590000000@s.whatsapp.net",
             },
             "messageTimestamp": 123,
             "pushName": "Lorenzo",
@@ -305,7 +305,7 @@ def _payload(msg_id="E2E-1", text="Oi"):
             "isGroup": False,
             "tenantId": 8,
             "whatsappId": 45,
-            "contact": {"id": 1, "number": "555592372732", "name": "Lorenzo"},
+            "contact": {"id": 1, "number": "555590000000", "name": "Lorenzo"},
             "whatsapp": {"id": 45, "type": "baileys"},
         },
     }
@@ -453,7 +453,7 @@ def test_sindico_recebe_o_texto_fixo(deps):
     asyncio.run(processador.processar_mensagem(_msg("ok")))
 
     out = deps.enviar.await_args.args[0]
-    assert out.phone == "555592372732"
+    assert out.phone == "555590000000"
     assert out.text == renderizar(MensagemSindico.SEM_CANAL)
     assert out.external_key == "MSG-1"
 
@@ -462,7 +462,7 @@ def test_morador_segue_intacto(deps):
     """O lookup roda para todo mundo, mas só desvia quem é síndico."""
     asyncio.run(processador.processar_mensagem(_msg("Oi")))
 
-    deps.sindico.assert_awaited_once_with(deps.conn, "555592372732")
+    deps.sindico.assert_awaited_once_with(deps.conn, "555590000000")
     deps.upsert.assert_awaited_once()
     assert deps.enviar.await_args.args[0].text == RESPOSTA
 

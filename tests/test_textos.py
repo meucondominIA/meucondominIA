@@ -227,12 +227,12 @@ def test_aviso_de_reserva_cita_tudo_que_o_sindico_precisa():
         identificador="3f9a2b1c",
         area="Salão de Festas",
         dia=date(2026, 8, 8),
-        telefone_morador="5555992372732",
+        telefone_morador="5555990000000",
     )
     assert texto.startswith("Nova reserva #3f9a2b1c")
     assert "Salão de Festas" in texto
     assert "sábado, 08/08" in texto
-    assert "5555992372732" in texto
+    assert "5555990000000" in texto
 
 
 def test_aviso_de_cancelamento_diz_que_o_dia_voltou():
@@ -241,11 +241,11 @@ def test_aviso_de_cancelamento_diz_que_o_dia_voltou():
         identificador="3f9a2b1c",
         area="Salão de Festas",
         dia=date(2026, 8, 8),
-        telefone_morador="5555992372732",
+        telefone_morador="5555990000000",
     )
     assert texto.startswith("Reserva cancelada #3f9a2b1c")
     assert "sábado, 08/08" in texto
-    assert "5555992372732" in texto
+    assert "5555990000000" in texto
     assert texto.endswith("O dia voltou a ficar livre.")
 
 
@@ -256,7 +256,7 @@ def test_os_dois_avisos_da_mesma_reserva_se_distinguem_na_PRIMEIRA_linha():
         identificador="3f9a2b1c",
         area="Salão de Festas",
         dia=date(2026, 8, 8),
-        telefone_morador="5555992372732",
+        telefone_morador="5555990000000",
     )
     nova = renderizar(MensagemSindico.AVISO_RESERVA, **contexto)
     cancelada = renderizar(MensagemSindico.AVISO_CANCELAMENTO, **contexto)
@@ -272,7 +272,7 @@ def test_nenhum_aviso_ao_sindico_promete_painel_ou_aprovacao():
         identificador="3f9a2b1c",
         area="Salão de Festas",
         dia=date(2026, 8, 8),
-        telefone_morador="5555992372732",
+        telefone_morador="5555990000000",
     )
     for identidade in (
         MensagemSindico.AVISO_RESERVA,
@@ -317,13 +317,13 @@ def test_aviso_de_ocorrencia_reusa_o_resumo_do_morador():
         tipo=TipoSolicitacao.MANUTENCAO,
         descricao="Vazamento no 3º andar",
         anexos=[_ANEXO],
-        telefone_morador="5555992372732",
+        telefone_morador="5555990000000",
     )
     assert texto.startswith("Ocorrência #7b2e1a04")
     assert "Manutenção" in texto
     assert "Vazamento no 3º andar" in texto
     assert "(1 foto anexada)" in texto
-    assert "5555992372732" in texto
+    assert "5555990000000" in texto
 
 
 @pytest.mark.parametrize(

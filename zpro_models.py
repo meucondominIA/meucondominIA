@@ -35,7 +35,7 @@ class ZproKey(_ZproBase):
     remote_jid: str | None = Field(
         default=None, validation_alias="remoteJid"
     )  # é LID, NÃO telefone
-    sender_pn: str | None = None  # "555592372732@s.whatsapp.net" (fallback)
+    sender_pn: str | None = None  # "555590000000@s.whatsapp.net" (fallback)
 
 
 class ZproExtendedText(_ZproBase):
@@ -138,7 +138,7 @@ class IncomingMessage(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     message_id: str  # msg.key.id  -> dedup
-    phone: str  # só dígitos com DDI: "555592372732"
+    phone: str  # só dígitos com DDI: "555590000000"
     text: str | None
     message_type: MessageType
     push_name: str | None
@@ -164,7 +164,7 @@ class IgnoreMessage(Exception):
 
 
 def normalize_phone(value: str | None) -> str | None:
-    """Mantém só os dígitos. '555592372732@s.whatsapp.net' -> '555592372732'."""
+    """Mantém só os dígitos. '555590000000@s.whatsapp.net' -> '555590000000'."""
     if not value:
         return None
     digits = re.sub(r"\D", "", value)

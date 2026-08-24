@@ -43,7 +43,7 @@ def _payload(*, msg_id="MSG-1", from_me=False, is_group=False, text="Oi"):
             "key": {
                 "id": msg_id,
                 "fromMe": from_me,
-                "sender_pn": "555592372732@s.whatsapp.net",
+                "sender_pn": "555590000000@s.whatsapp.net",
             },
             "messageTimestamp": 123,
             "pushName": "Lorenzo",
@@ -54,7 +54,7 @@ def _payload(*, msg_id="MSG-1", from_me=False, is_group=False, text="Oi"):
             "isGroup": is_group,
             "tenantId": 8,
             "whatsappId": 45,
-            "contact": {"id": 1, "number": "555592372732", "name": "Lorenzo"},
+            "contact": {"id": 1, "number": "555590000000", "name": "Lorenzo"},
             "whatsapp": {"id": 45, "type": "baileys"},
         },
     }
